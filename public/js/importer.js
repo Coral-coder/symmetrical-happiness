@@ -626,36 +626,82 @@ export function parseHomebrewerySource(body) {
 // fetches go direct first and then fall back to public CORS proxies. The
 // proxy list is configurable in Settings.
 
+// {url} = the page address URL-encoded, {rawurl} = as-is.
 export const DEFAULT_PROXIES = [
-  'https://corsproxy.io/?url={url}',
+  'https://r.jina.ai/{rawurl}',
   'https://api.allorigins.win/raw?url={url}',
   'https://api.codetabs.com/v1/proxy/?quest={url}',
 ];
 
+// Sites known to refuse every proxy, so we can say so plainly.
+const PROXY_BLOCKED = [/(^|\.)wikidot\.com$/i, /(^|\.)dndbeyond\.com$/i];
+
 let preferredRoute = null; // the route that worked last time, tried first
 
-export function makeFetcher({ proxies = DEFAULT_PROXIES, timeoutMs = 20000, fetchImpl = (...a) => fetch(...a) } = {}) {
-  const routes = [null, ...proxies.filter(Boolean)]; // null = direct
-  return async function fetchText(url) {
-    const order = preferredRoute !== null && routes.includes(preferredRoute)
-      ? [preferredRoute, ...routes.filter((r) => r !== preferredRoute)]
-      : routes;
-    const errors = [];
-    for (const route of order) {
-      const target = route ? route.replace('{url}', encodeURIComponent(url)) : url;
-      try {
-        const res = await fetchImpl(target, { signal: AbortSignal.timeout(timeoutMs) });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const body = await res.text();
-        if (!body.trim()) throw new Error('empty response');
-        preferredRoute = route;
-        return { body, type: res.headers.get('content-type') || '', finalUrl: url };
-      } catch (err) {
-        errors.push(`${route ? new URL(target).hostname : 'direct'}: ${err.message}`);
-      }
+function routeRequest(route, url) {
+  if (!route) return { target: url, headers: {} };
+  const target = route.replace('{rawurl}', url).replace('{url}', encodeURIComponent(url));
+  // Jina Reader returns the rendered page when asked for HTML.
+  const headers = /^https:\/\/r\.jina\.ai\//.test(target) ? { 'X-Respond-With': 'html' } : {};
+  return { target, headers };
+}
+
+/**
+ * Build a fetchText(url) function. It tries a direct request first (works when
+ * the site allows cross-origin reads), then races all proxies at once and
+ * uses whichever answers first with real content.
+ */
+export function makeFetcher({ proxies = DEFAULT_PROXIES, timeoutMs = 25000, retryDelayMs = 1500, fetchImpl = (...a) => fetch(...a) } = {}) {
+  const list = proxies.filter(Boolean);
+
+  const attempt = async (route, url) => {
+    const { target, headers } = routeRequest(route, url);
+    const label = route ? new URL(target).hostname : 'direct';
+    try {
+      const res = await fetchImpl(target, { headers, signal: AbortSignal.timeout(route ? timeoutMs : 10000) });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const body = await res.text();
+      if (!body.trim()) throw new Error('empty response');
+      // Some proxies answer 200 with an error document.
+      if (/^\s*\{\s*"(data"\s*:\s*null|error|status"\s*:\s*"fail)/.test(body.slice(0, 200))) throw new Error('proxy error');
+      return { route, result: { body, type: res.headers.get('content-type') || '', finalUrl: url } };
+    } catch (err) {
+      const e = new Error(`${label}: ${err.name === 'TimeoutError' ? 'timed out' : err.message}`);
+      throw e;
     }
-    const e = new Error(`Couldn't read ${url}. Tried ${errors.join('; ')}.`);
+  };
+
+  return async function fetchText(url) {
+    const errors = [];
+    const tryList = async (routes) => {
+      if (!routes.length) return null;
+      try {
+        return await Promise.any(routes.map((r) => attempt(r, url)));
+      } catch (agg) {
+        errors.push(...(agg.errors || [agg]).map((e) => e.message));
+        return null;
+      }
+    };
+    const first = preferredRoute && list.includes(preferredRoute) ? [preferredRoute] : [];
+    let hit = (await tryList([null]))
+      || (await tryList(first))
+      || (await tryList(list.filter((r) => !first.includes(r))));
+    if (!hit && list.length && retryDelayMs >= 0) {
+      // Free proxies are flaky; one more round after a short pause often works.
+      await new Promise((r) => setTimeout(r, retryDelayMs));
+      hit = await tryList(list);
+    }
+    if (hit) {
+      preferredRoute = hit.route;
+      return hit.result;
+    }
+    let host = '';
+    try { host = new URL(url).hostname; } catch { /* ignore */ }
+    const e = new Error(PROXY_BLOCKED.some((re) => re.test(host))
+      ? `${host} usually blocks apps from reading its pages, and this time none of the routes got through.`
+      : `Couldn't read ${url} (${errors.join('; ')}).`);
     e.blocked = true;
+    e.host = host;
     throw e;
   };
 }

@@ -21,14 +21,14 @@
         <p class="tagline">Your spells, items &amp; monsters, all in one place</p>
       </div>
     </div>
-    <nav class="tabs" role="tablist">
+    <button class="btn primary install" id="install" hidden>⬇ Install</button>
+    <nav class="tabs" role="tablist" aria-label="Sections">
       <button class="tab" data-view="spell" role="tab">Spells <span class="count" data-count="spell">0</span></button>
       <button class="tab" data-view="item" role="tab">Items <span class="count" data-count="item">0</span></button>
       <button class="tab" data-view="monster" role="tab">Monsters <span class="count" data-count="monster">0</span></button>
       <button class="tab" data-view="import" role="tab">＋ Import</button>
       <button class="tab" data-view="screen" role="tab">DM Screen</button>
       <button class="tab" data-view="more" role="tab">⚙ More</button>
-      <button class="btn primary install" id="install" hidden>⬇ Install app</button>
     </nav>
   </header>
 
@@ -80,6 +80,8 @@
               <a href="#" class="example">https://dnd5e.wikidot.com/wondrous-items</a></p>
           </div>
           <div data-mode-panel="text" hidden>
+            <button class="btn primary paste-btn" type="button" id="paste-clipboard">📋 Paste from clipboard</button>
+            <p class="hint">Open the page, select everything (long-press → <b>Select all</b>, or Ctrl+A), copy it, then tap the button. Or paste into the box yourself.</p>
             <label class="field">
               <span>Paste spells, items or monsters: copy a whole webpage (Ctrl+A, Ctrl+C), plain text, Homebrewery markdown, or JSON</span>
               <textarea id="import-text" rows="10" placeholder="Ember Lance&#10;2nd-level evocation&#10;Casting Time: 1 action&#10;Range: 90 feet&#10;Components: V, S&#10;Duration: Instantaneous&#10;A lance of white-hot embers..."></textarea>
@@ -112,13 +114,13 @@
             <h2 id="preview-title">Preview</h2>
             <p class="muted" id="preview-sub"></p>
           </div>
-          <div class="toolbar-right">
+          <div class="toolbar-right" id="preview-actions">
             <label class="check"><input type="checkbox" id="overwrite"> Overwrite duplicates</label>
             <button class="btn primary" id="save-selected">Save selected</button>
           </div>
         </div>
         <div id="warnings"></div>
-        <div class="table-wrap">
+        <div class="table-wrap" id="preview-table-wrap">
           <table class="entries preview-table">
             <thead><tr>
               <th class="cb"><input type="checkbox" id="preview-all" checked aria-label="Select all"></th>
@@ -179,7 +181,9 @@
           <p><a class="btn primary" id="bookmarklet" href="#">📥 Send to Homebrew Vault</a> ← drag this to your bookmarks bar</p>
           <details>
             <summary>Phone, or can't drag?</summary>
-            <p class="hint">Create a new bookmark and paste this as its URL. On Android Chrome, run it by typing the bookmark's name in the address bar and tapping it.</p>
+            <p class="hint"><b>Android (Chrome):</b> tap <b>Copy code</b>. Bookmark any page (⋮ → ☆), then edit that bookmark:
+              name it <b>vault</b> and replace its URL with the copied code. To use it, open the page you want, type
+              <b>vault</b> in the address bar, and tap the bookmark that appears (the one with the ☆, not the search suggestion).</p>
             <textarea id="bookmarklet-code" rows="4" readonly></textarea>
             <button class="btn" id="copy-bookmarklet">Copy code</button>
           </details>

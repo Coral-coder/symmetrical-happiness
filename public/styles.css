@@ -223,8 +223,37 @@ dialog::backdrop { background: rgba(20, 12, 6, .55); }
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 
+.install { order: 3; }
+.tabs { order: 2; }
+.help-card {
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 14px 16px; margin-bottom: 10px; box-shadow: var(--shadow);
+}
+.help-card ol { margin: 8px 0 12px; padding-left: 22px; }
+.help-card li { margin-bottom: 4px; }
+.paste-btn { margin-bottom: 4px; }
+
 @media (max-width: 700px) {
-  .topbar { padding: 10px 16px; }
-  main { padding: 16px; }
+  /* Compact header: one brand row + one swipeable row of tabs. */
+  .topbar { padding: 8px 12px 0; gap: 6px; flex-wrap: wrap; }
+  .brand { flex: 1 1 auto; min-width: 0; gap: 10px; }
+  .logo { width: 32px; height: 32px; border-radius: 7px; }
+  .brand h1 { font-size: 19px; }
+  .tagline { display: none; }
+  .install { order: 1; padding: 5px 12px; font-size: 14px; margin: 0; }
+  .tabs {
+    order: 2; flex: 0 0 calc(100% + 24px); flex-wrap: nowrap; overflow-x: auto; gap: 2px;
+    margin: 0 -12px; padding: 4px 12px 8px; scrollbar-width: none;
+  }
+  .tabs::-webkit-scrollbar { display: none; }
+  .tab { padding: 6px 12px; white-space: nowrap; flex: 0 0 auto; font-size: 14px; }
+  main { padding: 14px 12px 40px; }
+  .card { padding: 14px; }
+  .filters { padding: 12px; }
   .hide-sm { display: none; }
+  .preview-head h2 { font-size: 22px; }
+  .dialog-inner { padding: 18px; }
+  .statblock h2 { font-size: 24px; }
+  .preview-table input[data-k="name"] { min-width: 170px; }
+  .preview-table input, .preview-table select { min-width: 110px; }
 }

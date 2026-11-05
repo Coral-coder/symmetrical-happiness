@@ -63,7 +63,9 @@ const settings = {
   get proxies() {
     try {
       const v = JSON.parse(localStorage.getItem('hv-proxies') || 'null');
-      return Array.isArray(v) ? v : DEFAULT_PROXIES;
+      // Lists saved before corsproxy.io started requiring a key are upgraded.
+      if (!Array.isArray(v) || v.some((x) => x.includes('corsproxy.io/?url='))) return DEFAULT_PROXIES;
+      return v;
     } catch { return DEFAULT_PROXIES; }
   },
   set proxies(v) {
@@ -462,11 +464,62 @@ function editEntry(e) {
 // ------------------------------------------------------------ import view
 
 let importMode = 'url';
-$$('.seg-btn').forEach((b) => b.addEventListener('click', () => {
-  importMode = b.dataset.mode;
-  $$('.seg-btn').forEach((x) => x.classList.toggle('active', x === b));
-  $$('[data-mode-panel]').forEach((p) => { p.hidden = p.dataset.modePanel !== importMode; });
-}));
+function setImportMode(mode) {
+  importMode = mode;
+  $$('.seg-btn').forEach((x) => x.classList.toggle('active', x.dataset.mode === mode));
+  $$('[data-mode-panel]').forEach((p) => { p.hidden = p.dataset.modePanel !== mode; });
+}
+$$('.seg-btn').forEach((b) => b.addEventListener('click', () => setImportMode(b.dataset.mode)));
+
+const isTouch = matchMedia('(pointer: coarse)').matches;
+
+function blockedHelp(url) {
+  const steps = isTouch
+    ? `<ol>
+        <li><a href="${esc(url)}" target="_blank" rel="noopener">Open the page</a> in your browser.</li>
+        <li>Long-press any text → <b>Select all</b> → <b>Copy</b>.</li>
+        <li>Come back here and tap <b>📋 Paste from clipboard</b>.</li>
+      </ol>
+      <p class="hint">Copying only grabs what's visible. On pages with tabs (like wikidot class spell lists), it copies just the open tab.
+        To grab every tab at once, use the bookmarklet from <a href="#more">⚙ More</a>.</p>`
+    : `<ol>
+        <li><a href="${esc(url)}" target="_blank" rel="noopener">Open the page</a> and click your <b>Send to Homebrew Vault</b> bookmark (set it up under <a href="#more">⚙ More</a>), <i>or</i></li>
+        <li>press <b>Ctrl+A</b>, <b>Ctrl+C</b> on the page, come back here and click <b>📋 Paste from clipboard</b>.
+          Copying only grabs what's visible, so on pages with tabs use the bookmarklet.</li>
+      </ol>`;
+  return `<div class="help-card"><b>Import it by copying the page instead</b>${steps}
+    <button class="btn primary" type="button" id="go-paste">📋 Paste from clipboard</button></div>`;
+}
+$('#warnings').addEventListener('click', (ev) => {
+  if (ev.target.id === 'go-paste') pasteFromClipboard();
+});
+
+async function pasteFromClipboard() {
+  setImportMode('text');
+  try {
+    let html = '';
+    let plain = '';
+    if (navigator.clipboard?.read) {
+      for (const item of await navigator.clipboard.read()) {
+        if (!html && item.types.includes('text/html')) html = await (await item.getType('text/html')).text();
+        if (!plain && item.types.includes('text/plain')) plain = await (await item.getType('text/plain')).text();
+      }
+    } else if (navigator.clipboard?.readText) {
+      plain = await navigator.clipboard.readText();
+    } else {
+      throw new Error('no clipboard access');
+    }
+    if (!html && !plain) { toast('Your clipboard is empty. Copy the page first.'); return; }
+    pastedHtml = html && /<(table|p|div|li|h\d)\b/i.test(html) ? html : null;
+    $('#import-text').value = plain || html.replace(/<[^>]+>/g, ' ');
+    $('#paste-note').hidden = !pastedHtml;
+    $('#import-go').click();
+  } catch {
+    $('#import-text').focus();
+    toast('Long-press the box below and choose Paste');
+  }
+}
+$('#paste-clipboard').addEventListener('click', pasteFromClipboard);
 $$('.example').forEach((a) => a.addEventListener('click', (ev) => {
   ev.preventDefault();
   $('#import-url').value = a.textContent;
@@ -516,6 +569,11 @@ $('#import-form').addEventListener('submit', async (ev) => {
         fetchText: makeFetcher({ proxies: settings.proxies }),
         onProgress: (n, total) => { btn.innerHTML = `<span class="spinner"></span> Reading linked pages ${n}/${total}…`; },
       });
+      if (!res.entries.length) {
+        // Usually a bot check or a page built by JavaScript: offer the copy route.
+        res.warnings = ['Nothing was recognised on that page. The site may build its content with JavaScript, or show apps a bot check instead of the real page.'];
+        res.blocked = true;
+      }
     } else if (pastedHtml) {
       res = { ...parseHtml(pastedHtml), url: '', warnings: [] };
       if (!res.entries.length) res = { title: '', site: '', url: '', entries: parseText(textIn), warnings: [] };
@@ -528,10 +586,7 @@ $('#import-form').addEventListener('submit', async (ev) => {
     showPreview(res);
   } catch (err) {
     if (err.blocked) {
-      showPreview({ title: '', site: '', url, entries: [], warnings: [
-        `${err.message}`,
-        'That site could not be reached from the browser. Open it in another tab and use the "Send to Homebrew Vault" bookmarklet (see the More tab), or select the page (Ctrl+A / long-press → Select all), copy, and use "Paste".',
-      ] });
+      showPreview({ title: '', site: '', url, entries: [], blocked: true, warnings: [err.message] });
     } else {
       toast(err.message);
     }
@@ -561,8 +616,12 @@ function renderPreview(res) {
   $('#preview').hidden = false;
   const counts = ['spell', 'item', 'monster'].map((k) => [k, state.preview.filter((e) => e.kind === k).length]).filter(([, n]) => n);
   $('#preview-title').textContent = state.preview.length ? `Found ${state.preview.length} ${state.preview.length === 1 ? 'entry' : 'entries'}` : 'Nothing found';
-  $('#preview-sub').textContent = [res.title, counts.map(([k, n]) => `${n} ${KIND_LABEL[k].toLowerCase()}${n === 1 ? '' : 's'}`).join(', ')].filter(Boolean).join(' · ');
-  $('#warnings').innerHTML = (res.warnings || []).map((w) => `<div class="warning">${esc(w)}</div>`).join('');
+  $('#preview-sub').textContent = state.preview.length === 0 ? '' : [res.title, counts.map(([k, n]) => `${n} ${KIND_LABEL[k].toLowerCase()}${n === 1 ? '' : 's'}`).join(', ')].filter(Boolean).join(' · ');
+  $('#warnings').innerHTML = (res.warnings || []).map((w) => `<div class="warning">${esc(w)}</div>`).join('')
+    + (res.blocked ? blockedHelp(res.url) : '');
+  const none = state.preview.length === 0;
+  $('#preview-table-wrap').hidden = none;
+  $('#preview-actions').hidden = none;
   $('#preview-all').checked = true;
   $('#preview-body').innerHTML = state.preview.map((e, i) => {
     let a = '';
@@ -779,10 +838,18 @@ if ('serviceWorker' in navigator && location.protocol !== 'file:') {
 // Android "Share → Homebrew Vault" lands here as ?url=…&text=…
 function handleShareTarget() {
   const params = new URLSearchParams(location.search);
-  const shared = params.get('url') || (params.get('text') || '').match(/https?:\/\/\S+/)?.[0];
-  if (!shared) return false;
+  const text = (params.get('text') || '').trim();
+  const link = params.get('url') || text.match(/https?:\/\/\S+/)?.[0];
+  if (!text && !link) return false;
   history.replaceState(null, '', appUrl() + '#import');
-  $('#import-url').value = shared;
+  // Sharing selected text (not just a link) imports that text directly.
+  if (text && text.replace(link || '', '').trim().length > 40) {
+    setImportMode('text');
+    $('#import-text').value = text;
+  } else {
+    setImportMode('url');
+    $('#import-url').value = link;
+  }
   setTimeout(() => $('#import-go').click(), 0);
   return true;
 }

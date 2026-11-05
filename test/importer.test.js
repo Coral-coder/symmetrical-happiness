@@ -209,16 +209,33 @@ test('fetcher falls back to the next proxy when direct fetch is blocked', async 
     if (url.startsWith('https://p1.test')) return fakeResponse('nope', { status: 429 });
     return fakeResponse('<p>hello</p>');
   };
-  const fetchText = makeFetcher({ proxies: ['https://p1.test/?u={url}', 'https://p2.test/{url}'], fetchImpl });
+  const fetchText = makeFetcher({ proxies: ['https://p1.test/?u={url}', 'https://p2.test/{rawurl}'], fetchImpl });
   const r = await fetchText('https://example.com/a?b=1');
   assert.equal(r.body, '<p>hello</p>');
   assert.equal(r.finalUrl, 'https://example.com/a?b=1');
-  assert.equal(calls[2], `https://p2.test/${encodeURIComponent('https://example.com/a?b=1')}`);
+  assert.ok(calls.includes(`https://p1.test/?u=${encodeURIComponent('https://example.com/a?b=1')}`));
+  assert.ok(calls.includes('https://p2.test/https://example.com/a?b=1'));
+  // The proxy that worked is tried first next time.
+  calls.length = 0;
+  await fetchText('https://example.com/c');
+  assert.deepEqual(calls, ['https://example.com/c', 'https://p2.test/https://example.com/c']);
 });
 
 test('fetcher reports every route when all fail', async () => {
-  const fetchText = makeFetcher({ proxies: ['https://p1.test/{url}'], fetchImpl: async () => { throw new TypeError('Failed to fetch'); } });
+  const fetchText = makeFetcher({ proxies: ['https://p1.test/{url}'], retryDelayMs: 1, fetchImpl: async () => { throw new TypeError('Failed to fetch'); } });
   await assert.rejects(fetchText('https://blocked.example/x'), (err) => err.blocked && /direct.*p1\.test/.test(err.message));
+  await assert.rejects(fetchText('https://dnd5e.wikidot.com/spell:x'), (err) => err.blocked && /usually blocks/.test(err.message));
+});
+
+test('a proxy answering 200 with an error document is not treated as the page', async () => {
+  const fetchImpl = async (url) => {
+    if (url.startsWith('https://site.test')) throw new TypeError('Failed to fetch');
+    if (url.startsWith('https://bad.test')) return fakeResponse('{"data":null,"code":422}', { type: 'application/json' });
+    await new Promise((r) => setTimeout(r, 20));
+    return fakeResponse('<p>real page</p>');
+  };
+  const fetchText = makeFetcher({ proxies: ['https://bad.test/{rawurl}', 'https://good.test/{rawurl}'], fetchImpl });
+  assert.equal((await fetchText('https://site.test/x')).body, '<p>real page</p>');
 });
 
 test('importFromUrl follows links on list pages to fill in descriptions', async () => {
@@ -241,4 +258,16 @@ test('importFromUrl follows links on list pages to fill in descriptions', async 
 
 test('importFromUrl rejects non-http urls', async () => {
   await assert.rejects(importFromUrl('file:///etc/passwd'), /Only http/);
+});
+
+test('fetcher retries the proxies once after a failed round', async () => {
+  let n = 0;
+  const fetchImpl = async (url) => {
+    if (url.startsWith('https://flaky.example')) throw new TypeError('Failed to fetch');
+    n++;
+    if (n === 1) return fakeResponse('busy', { status: 503 });
+    return fakeResponse('<p>ok now</p>');
+  };
+  const fetchText = makeFetcher({ proxies: ['https://retry-proxy.test/{rawurl}'], retryDelayMs: 1, fetchImpl });
+  assert.equal((await fetchText('https://flaky.example/x')).body, '<p>ok now</p>');
 });
