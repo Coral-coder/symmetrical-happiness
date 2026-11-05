@@ -4,13 +4,18 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Homebrew Vault</title>
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🐉</text></svg>">
+  <meta name="description" content="Track homebrew D&amp;D spells, magic items and monsters. Import them from webpages, filter, and delete. Works offline.">
+  <meta name="theme-color" content="#8a1c1c">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="icon" href="icons/icon-192.png" type="image/png" sizes="192x192">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
   <header class="topbar">
     <div class="brand">
-      <span class="logo">🐉</span>
+      <img class="logo" src="icons/icon.svg" alt="" width="40" height="40">
       <div>
         <h1>Homebrew Vault</h1>
         <p class="tagline">Your spells, items &amp; monsters, all in one place</p>
@@ -22,6 +27,8 @@
       <button class="tab" data-view="monster" role="tab">Monsters <span class="count" data-count="monster">0</span></button>
       <button class="tab" data-view="import" role="tab">＋ Import</button>
       <button class="tab" data-view="screen" role="tab">DM Screen</button>
+      <button class="tab" data-view="more" role="tab">⚙ More</button>
+      <button class="btn primary install" id="install" hidden>⬇ Install app</button>
     </nav>
   </header>
 
@@ -54,7 +61,7 @@
       <div class="card">
         <div class="seg" role="tablist">
           <button class="seg-btn active" data-mode="url">From a webpage</button>
-          <button class="seg-btn" data-mode="text">Paste text</button>
+          <button class="seg-btn" data-mode="text">Paste</button>
         </div>
 
         <form id="import-form">
@@ -65,17 +72,19 @@
             </label>
             <label class="check"><input type="checkbox" id="follow-links">
               Also open each linked entry to grab full descriptions <small>(slower; useful for list pages like wikidot)</small></label>
-            <p class="hint">Works with stat-block pages, spell/item list tables, sites that embed their data as JSON
-              (like mythical.ink), and Homebrewery share links. Try:
+            <p class="hint">Works with stat-block pages, spell/item/monster list tables, sites that embed their data as JSON
+              (like mythical.ink), and Homebrewery share links. Some sites refuse to be read from another page;
+              for those use the <a href="#more">bookmarklet</a> or copy &amp; paste. Try:
               <a href="#" class="example">https://dnd5e.wikidot.com/spells:wizard</a> ·
               <a href="#" class="example">https://mythical.ink/en/rpg-tools/dnd-spell-list</a> ·
               <a href="#" class="example">https://dnd5e.wikidot.com/wondrous-items</a></p>
           </div>
           <div data-mode-panel="text" hidden>
             <label class="field">
-              <span>Paste spells, items or monsters (plain text, Homebrewery markdown, or JSON)</span>
+              <span>Paste spells, items or monsters: copy a whole webpage (Ctrl+A, Ctrl+C), plain text, Homebrewery markdown, or JSON</span>
               <textarea id="import-text" rows="10" placeholder="Ember Lance&#10;2nd-level evocation&#10;Casting Time: 1 action&#10;Range: 90 feet&#10;Components: V, S&#10;Duration: Instantaneous&#10;A lance of white-hot embers..."></textarea>
             </label>
+            <p class="hint" id="paste-note" hidden>✓ Pasted with page formatting, so tables will be read too.</p>
           </div>
 
           <div class="row">
@@ -136,6 +145,61 @@
         <img src="img/dm-screen.jpg" alt="DM screen: character advancement, conditions, actions in combat, armor, weapons, cover, travel pace, damage types, and more" id="screen-img" draggable="false">
       </div>
     </section>
+
+    <!-- More: backup, install, bookmarklet, proxies -->
+    <section id="more" class="view" hidden>
+      <div class="more-grid">
+        <div class="card">
+          <h2>Your data</h2>
+          <p class="muted" id="vault-size"></p>
+          <p>Your vault is saved in this browser on this device only. Export a backup to keep it safe or to move it to another device.</p>
+          <div class="toolbar-right">
+            <button class="btn primary" id="export">⬇ Export backup</button>
+            <label class="btn">⬆ Restore backup<input type="file" id="import-backup" accept="application/json,.json" hidden></label>
+          </div>
+          <label class="check" style="margin-top:10px"><input type="checkbox" id="backup-replace"> Overwrite duplicates when restoring</label>
+          <hr class="soft">
+          <button class="btn danger" id="wipe">Delete everything</button>
+        </div>
+
+        <div class="card">
+          <h2>Install as an app</h2>
+          <p>Homebrew Vault works offline and can be installed like a normal app:</p>
+          <ul>
+            <li><b>Windows:</b> in Edge or Chrome, use the <b>Install app</b> button at the top (or the install icon in the address bar).</li>
+            <li><b>Android:</b> in Chrome, open the ⋮ menu and choose <b>Add to Home screen → Install</b>. Then you can <b>Share</b> any webpage to Homebrew Vault to import it.</li>
+            <li><b>iPhone / iPad:</b> in Safari, tap Share → <b>Add to Home Screen</b>.</li>
+          </ul>
+        </div>
+
+        <div class="card">
+          <h2>Bookmarklet</h2>
+          <p>Some sites (D&amp;D Beyond, for example) won't let other pages read them. The bookmarklet gets around this:
+            open the page you want, click the bookmark, and it sends that page straight into the importer.</p>
+          <p><a class="btn primary" id="bookmarklet" href="#">📥 Send to Homebrew Vault</a> ← drag this to your bookmarks bar</p>
+          <details>
+            <summary>Phone, or can't drag?</summary>
+            <p class="hint">Create a new bookmark and paste this as its URL. On Android Chrome, run it by typing the bookmark's name in the address bar and tapping it.</p>
+            <textarea id="bookmarklet-code" rows="4" readonly></textarea>
+            <button class="btn" id="copy-bookmarklet">Copy code</button>
+          </details>
+        </div>
+
+        <div class="card">
+          <h2>Import proxies</h2>
+          <p>Webpages are fetched directly when the site allows it. Otherwise, they go through these public CORS proxies, tried in order.
+            <code>{url}</code> is replaced by the page address. Pages you import are sent to these services.</p>
+          <p class="hint">Free public proxies are often rate-limited or down. For reliable imports, host your own free one on
+            Cloudflare Workers using <a href="https://github.com/coral-coder/symmetrical-happiness/blob/main/proxy/cloudflare-worker.js" target="_blank" rel="noopener">proxy/cloudflare-worker.js</a>
+            (5-minute setup) and put its URL first in this list. The bookmarklet and Paste never need a proxy.</p>
+          <textarea id="proxies" rows="4"></textarea>
+          <div class="toolbar-right" style="margin-top:8px">
+            <button class="btn" id="reset-proxies">Reset</button>
+            <button class="btn primary" id="save-proxies">Save</button>
+          </div>
+        </div>
+      </div>
+    </section>
   </main>
 
   <!-- Detail / edit dialog -->
@@ -145,6 +209,6 @@
 
   <div id="toast" class="toast" hidden></div>
 
-  <script src="app.js" type="module"></script>
+  <script src="js/app.js" type="module"></script>
 </body>
 </html>

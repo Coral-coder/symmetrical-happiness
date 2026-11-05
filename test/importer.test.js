@@ -1,6 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parseHtml, parseText, parseLevel, entriesFromJson } from '../src/importer.js';
+import { DOMParser } from 'linkedom';
+import {
+  parseHtml, parseText, parseLevel, entriesFromJson, importFromUrl, makeFetcher, parseHomebrewerySource,
+} from '../public/js/importer.js';
+
+// The importer runs in the browser; linkedom stands in for the DOM here.
+globalThis.DOMParser = DOMParser;
 
 test('parseLevel understands common spellings', () => {
   assert.equal(parseLevel('Cantrip'), 0);
@@ -178,4 +184,61 @@ test('JSON arrays of monsters and items', () => {
   assert.equal(entries[1].kind, 'item');
   assert.equal(entries[1].rarity, 'Rare');
   assert.equal(entries[1].attunement, 'Requires attunement');
+});
+
+test('Homebrewery /source page is unwrapped from its <code> block', () => {
+  const body = '<code><pre>#### Mote of Dawn\n*1st-level evocation*\n**Casting Time:** 1 action\n**Range:** 30 feet\n**Components:** V\n**Duration:** 1 round\nA mote of light &amp; warmth.</pre></code>';
+  const { entries } = parseHomebrewerySource(body);
+  assert.equal(entries.length, 1);
+  assert.equal(entries[0].name, 'Mote of Dawn');
+  assert.match(entries[0].description, /light & warmth/);
+});
+
+const fakeResponse = (body, { status = 200, type = 'text/html' } = {}) => ({
+  ok: status >= 200 && status < 300,
+  status,
+  headers: { get: () => type },
+  text: async () => body,
+});
+
+test('fetcher falls back to the next proxy when direct fetch is blocked', async () => {
+  const calls = [];
+  const fetchImpl = async (url) => {
+    calls.push(url);
+    if (url.startsWith('https://example.com')) throw new TypeError('Failed to fetch'); // CORS
+    if (url.startsWith('https://p1.test')) return fakeResponse('nope', { status: 429 });
+    return fakeResponse('<p>hello</p>');
+  };
+  const fetchText = makeFetcher({ proxies: ['https://p1.test/?u={url}', 'https://p2.test/{url}'], fetchImpl });
+  const r = await fetchText('https://example.com/a?b=1');
+  assert.equal(r.body, '<p>hello</p>');
+  assert.equal(r.finalUrl, 'https://example.com/a?b=1');
+  assert.equal(calls[2], `https://p2.test/${encodeURIComponent('https://example.com/a?b=1')}`);
+});
+
+test('fetcher reports every route when all fail', async () => {
+  const fetchText = makeFetcher({ proxies: ['https://p1.test/{url}'], fetchImpl: async () => { throw new TypeError('Failed to fetch'); } });
+  await assert.rejects(fetchText('https://blocked.example/x'), (err) => err.blocked && /direct.*p1\.test/.test(err.message));
+});
+
+test('importFromUrl follows links on list pages to fill in descriptions', async () => {
+  const pages = {
+    'https://wiki.test/spells': `<table><tr><th>Spell Name</th><th>School</th></tr>
+      <tr><td><a href="/spell:glow">Glow</a></td><td>Evocation</td></tr></table>`,
+    'https://wiki.test/spell:glow': `<html><head><title>Glow - Wiki</title></head><body><div id="page-content">
+      <p>Evocation cantrip</p><p>Casting Time: 1 action<br>Range: Touch<br>Components: V, M (a firefly)<br>Duration: 1 hour</p>
+      <p>An object glows softly.</p></div></body></html>`,
+  };
+  const fetchText = async (url) => ({ body: pages[url], type: 'text/html', finalUrl: url });
+  const res = await importFromUrl('https://wiki.test/spells', { followLinks: true, fetchText });
+  const [glow] = res.entries;
+  assert.equal(glow.name, 'Glow');
+  assert.equal(glow.level, 0);
+  assert.equal(glow.components, 'V, M (a firefly)');
+  assert.equal(glow.source_url, 'https://wiki.test/spell:glow');
+  assert.match(glow.description, /glows softly/);
+});
+
+test('importFromUrl rejects non-http urls', async () => {
+  await assert.rejects(importFromUrl('file:///etc/passwd'), /Only http/);
 });

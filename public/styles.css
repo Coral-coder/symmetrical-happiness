@@ -55,7 +55,7 @@ small { color: var(--muted); }
   box-shadow: var(--shadow);
 }
 .brand { display: flex; align-items: center; gap: 12px; }
-.logo { font-size: 32px; }
+.logo { width: 40px; height: 40px; border-radius: 9px; }
 .brand h1 { margin: 0; font-size: 22px; color: var(--accent); letter-spacing: .3px; }
 .tagline { margin: 0; color: var(--muted); font-size: 13px; }
 .tabs { display: flex; gap: 4px; flex-wrap: wrap; }
@@ -172,6 +172,16 @@ table.entries { width: 100%; border-collapse: collapse; }
 .seg { display: inline-flex; background: var(--panel-2); border-radius: 999px; padding: 3px; margin-bottom: 16px; }
 .seg-btn { border: 0; background: transparent; padding: 6px 14px; border-radius: 999px; cursor: pointer; font: inherit; color: var(--ink); }
 .seg-btn.active { background: var(--panel); box-shadow: var(--shadow); font-weight: 600; }
+
+/* ---------- More ---------- */
+.more-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; }
+.more-grid h2 { margin: 0 0 8px; font-size: 20px; }
+.more-grid ul { padding-left: 20px; }
+.more-grid li { margin-bottom: 6px; }
+hr.soft { border: 0; border-top: 1px solid var(--line); margin: 16px 0; }
+code { background: var(--panel-2); padding: 1px 5px; border-radius: 4px; font-size: 13px; }
+details summary { cursor: pointer; color: var(--accent); margin-top: 6px; }
+.install { margin-left: 6px; }
 
 /* ---------- DM screen ---------- */
 .screen-wrap {

@@ -1,4 +1,7 @@
-// Homebrew Vault front end. Plain JS, no build step.
+// Homebrew Vault front end. Plain JS, no build step, no server: data lives
+// in this browser's IndexedDB (see store.js) and imports are parsed locally.
+import { openStore, entriesFromBackup } from './store.js';
+import { importFromUrl, parseText, parseHtml, makeFetcher, DEFAULT_PROXIES } from './importer.js';
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
@@ -45,25 +48,28 @@ function persist() {
   try { localStorage.setItem('hv-filters', JSON.stringify({ filters: state.filters, sort: state.sort })); } catch { /* ignore */ }
 }
 
-// ------------------------------------------------------------ api
+// ------------------------------------------------------------ storage
 
-async function api(path, opts = {}) {
-  const res = await fetch(path, {
-    ...opts,
-    headers: { 'Content-Type': 'application/json', ...(opts.headers || {}) },
-    body: opts.body ? JSON.stringify(opts.body) : undefined,
-  });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
-  return data;
-}
+let store = null;
 
 async function loadEntries() {
-  const all = await api('/api/entries');
+  const all = await store.list();
   state.entries = { spell: [], item: [], monster: [] };
   for (const e of all) state.entries[e.kind]?.push(e);
   for (const k of Object.keys(state.entries)) $(`[data-count="${k}"]`).textContent = state.entries[k].length;
 }
+
+const settings = {
+  get proxies() {
+    try {
+      const v = JSON.parse(localStorage.getItem('hv-proxies') || 'null');
+      return Array.isArray(v) ? v : DEFAULT_PROXIES;
+    } catch { return DEFAULT_PROXIES; }
+  },
+  set proxies(v) {
+    try { localStorage.setItem('hv-proxies', JSON.stringify(v)); } catch { /* ignore */ }
+  },
+};
 
 function toast(msg) {
   const t = $('#toast');
@@ -318,7 +324,7 @@ function findEntry(id) {
 
 async function removeEntries(ids) {
   try {
-    const { deleted } = await api('/api/entries/delete', { method: 'POST', body: { ids } });
+    const deleted = await store.remove(ids);
     ids.forEach((id) => state.selected.delete(id));
     await loadEntries();
     renderLibrary();
@@ -438,11 +444,11 @@ function editEntry(e) {
     data.source_url = e.source_url || '';
     try {
       if (isNew) {
-        const r = await api('/api/entries', { method: 'POST', body: { entries: [data] } });
+        const r = await store.save([data]);
         if (r.errors?.length) throw new Error(r.errors[0]);
         if (!r.saved) throw new Error('An entry with that name and source already exists.');
       } else {
-        await api(`/api/entries/${e.id}`, { method: 'PUT', body: data });
+        await store.update(e.id, data);
       }
       await loadEntries();
       dialog.close();
@@ -466,37 +472,90 @@ $$('.example').forEach((a) => a.addEventListener('click', (ev) => {
   $('#import-url').value = a.textContent;
 }));
 
+// Pasting from a webpage keeps its HTML, so tables survive the trip.
+let pastedHtml = null;
+$('#import-text').addEventListener('paste', (ev) => {
+  const html = ev.clipboardData?.getData('text/html');
+  pastedHtml = html && /<(table|p|div|li|h\d)\b/i.test(html) ? html : null;
+  $('#paste-note').hidden = !pastedHtml;
+});
+$('#import-text').addEventListener('input', (ev) => {
+  if (ev.inputType !== 'insertFromPaste') { pastedHtml = null; $('#paste-note').hidden = true; }
+});
+
+function showPreview(res) {
+  const override = $('#import-source').value.trim();
+  const kind = $('#import-kind').value;
+  const fallbackSource = res.site || res.title || '';
+  state.preview = res.entries
+    .filter((e) => !kind || e.kind === kind)
+    .map((e) => ({
+      ...e,
+      source: override || e.source || fallbackSource,
+      source_url: e.source_url || res.url || '',
+      _include: true,
+    }));
+  renderPreview(res);
+}
+
 $('#import-form').addEventListener('submit', async (ev) => {
   ev.preventDefault();
   const btn = $('#import-go');
-  const body = importMode === 'url'
-    ? { url: $('#import-url').value.trim(), followLinks: $('#follow-links').checked }
-    : { text: $('#import-text').value };
-  if (importMode === 'url' && !body.url) return toast('Enter a URL first');
-  if (importMode === 'text' && !body.text.trim()) return toast('Paste some text first');
+  const url = $('#import-url').value.trim();
+  const textIn = $('#import-text').value;
+  const followLinks = $('#follow-links').checked;
+  if (importMode === 'url' && !url) return toast('Enter a URL first');
+  if (importMode === 'text' && !textIn.trim()) return toast('Paste something first');
   btn.disabled = true;
-  btn.innerHTML = `<span class="spinner"></span> ${body.followLinks ? 'Reading page and linked entries…' : 'Reading…'}`;
+  btn.innerHTML = `<span class="spinner"></span> ${followLinks && importMode === 'url' ? 'Reading page…' : 'Reading…'}`;
   try {
-    const res = await api('/api/import/preview', { method: 'POST', body });
-    const override = $('#import-source').value.trim();
-    const kind = $('#import-kind').value;
-    const fallbackSource = res.site || res.title || '';
-    state.preview = res.entries
-      .filter((e) => !kind || e.kind === kind)
-      .map((e) => ({
-        ...e,
-        source: override || e.source || fallbackSource,
-        source_url: e.source_url || res.url || '',
-        _include: true,
-      }));
-    renderPreview(res);
+    let res;
+    if (importMode === 'url') {
+      res = await importFromUrl(url, {
+        followLinks,
+        fetchText: makeFetcher({ proxies: settings.proxies }),
+        onProgress: (n, total) => { btn.innerHTML = `<span class="spinner"></span> Reading linked pages ${n}/${total}…`; },
+      });
+    } else if (pastedHtml) {
+      res = { ...parseHtml(pastedHtml), url: '', warnings: [] };
+      if (!res.entries.length) res = { title: '', site: '', url: '', entries: parseText(textIn), warnings: [] };
+    } else {
+      res = { title: '', site: '', url: '', entries: parseText(textIn), warnings: [] };
+    }
+    if (!res.entries.length && importMode === 'text') {
+      res.warnings.push('Nothing recognised. Make sure each entry includes its type line, e.g. "3rd-level evocation", "Wondrous item, rare" or "Medium humanoid, any alignment".');
+    }
+    showPreview(res);
   } catch (err) {
-    toast(err.message);
+    if (err.blocked) {
+      showPreview({ title: '', site: '', url, entries: [], warnings: [
+        `${err.message}`,
+        'That site could not be reached from the browser. Open it in another tab and use the "Send to Homebrew Vault" bookmarklet (see the More tab), or select the page (Ctrl+A / long-press → Select all), copy, and use "Paste".',
+      ] });
+    } else {
+      toast(err.message);
+    }
   } finally {
     btn.disabled = false;
     btn.textContent = 'Find content';
   }
 });
+
+// The bookmarklet opens this app and posts the page it was clicked on.
+window.addEventListener('message', (ev) => {
+  const d = ev.data;
+  if (!d || d.type !== 'hv-import' || typeof d.html !== 'string') return;
+  try { ev.source?.postMessage('hv-ok', '*'); } catch { /* ignore */ }
+  if (d.nonce) {
+    if (handledMessages.has(d.nonce)) return;
+    handledMessages.add(d.nonce);
+  }
+  location.hash = 'import';
+  const res = parseHtml(d.html, { url: d.url || '' });
+  showPreview({ ...res, url: d.url || '', warnings: res.entries.length ? [] : ['No spells, items or monsters were recognised on that page.'] });
+  toast(`Received ${res.title || 'page'} from the bookmarklet`);
+});
+const handledMessages = new Set();
 
 function renderPreview(res) {
   $('#preview').hidden = false;
@@ -568,7 +627,7 @@ $('#save-selected').addEventListener('click', async () => {
   const entries = state.preview.filter((e) => e._include).map(({ _include, ...e }) => e);
   if (!entries.length) return;
   try {
-    const r = await api('/api/entries', { method: 'POST', body: { entries, replace: $('#overwrite').checked } });
+    const r = await store.save(entries, { replace: $('#overwrite').checked });
     await loadEntries();
     const msg = [`Saved ${r.saved}`];
     if (r.skipped) msg.push(`${r.skipped} already in your vault (skipped)`);
@@ -609,12 +668,14 @@ $('#save-selected').addEventListener('click', async () => {
 
 function route() {
   const view = (location.hash || '#spell').slice(1);
-  state.view = ['spell', 'item', 'monster', 'import', 'screen'].includes(view) ? view : 'spell';
+  state.view = ['spell', 'item', 'monster', 'import', 'screen', 'more'].includes(view) ? view : 'spell';
   $$('.tab').forEach((t) => t.classList.toggle('active', t.dataset.view === state.view));
   const isLib = ['spell', 'item', 'monster'].includes(state.view);
   $('#library').hidden = !isLib;
   $('#import').hidden = state.view !== 'import';
   $('#screen').hidden = state.view !== 'screen';
+  $('#more').hidden = state.view !== 'more';
+  if (state.view === 'more') renderMore();
   if (isLib) {
     state.selected.clear();
     renderLibrary();
@@ -623,4 +684,116 @@ function route() {
 $$('.tab').forEach((t) => t.addEventListener('click', () => { location.hash = t.dataset.view; }));
 window.addEventListener('hashchange', route);
 
-loadEntries().then(route).catch((err) => { route(); toast(`Could not load your vault: ${err.message}`); });
+// ------------------------------------------------------------ "More": backup, install, bookmarklet, proxies
+
+function appUrl() {
+  return location.href.replace(/[?#].*$/, '');
+}
+
+function bookmarkletCode() {
+  const app = appUrl();
+  const origin = new URL(app).origin;
+  return `javascript:(()=>{const A=${JSON.stringify(app)};const w=window.open(A+'#import','homebrew-vault');`
+    + `if(!w){alert('Allow pop-ups to send this page to Homebrew Vault');return}`
+    + `const d={type:'hv-import',nonce:Math.random().toString(36).slice(2),html:document.documentElement.outerHTML,url:location.href};`
+    + `let n=0;const t=setInterval(()=>{if(++n>60)return clearInterval(t);try{w.postMessage(d,${JSON.stringify(origin)})}catch(e){}},500);`
+    + `addEventListener('message',e=>{if(e.data==='hv-ok')clearInterval(t)})})();`;
+}
+
+function renderMore() {
+  $('#bookmarklet').href = bookmarkletCode();
+  $('#bookmarklet-code').value = bookmarkletCode();
+  $('#proxies').value = settings.proxies.join('\n');
+  const total = Object.values(state.entries).reduce((n, l) => n + l.length, 0);
+  $('#vault-size').textContent = `${total} ${total === 1 ? 'entry' : 'entries'} stored in this browser.`;
+}
+
+$('#bookmarklet').addEventListener('click', (ev) => {
+  ev.preventDefault();
+  toast('Drag this button to your bookmarks bar (or copy the code below)');
+});
+$('#copy-bookmarklet').addEventListener('click', async () => {
+  try { await navigator.clipboard.writeText(bookmarkletCode()); toast('Bookmarklet copied'); } catch { $('#bookmarklet-code').select(); }
+});
+$('#save-proxies').addEventListener('click', () => {
+  settings.proxies = $('#proxies').value.split('\n').map((l) => l.trim()).filter(Boolean);
+  toast('Proxy list saved');
+});
+$('#reset-proxies').addEventListener('click', () => {
+  settings.proxies = DEFAULT_PROXIES;
+  renderMore();
+  toast('Proxy list reset');
+});
+
+$('#export').addEventListener('click', async () => {
+  const data = await store.exportAll();
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `homebrew-vault-${new Date().toISOString().slice(0, 10)}.json`;
+  document.body.append(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+});
+$('#import-backup').addEventListener('change', async (ev) => {
+  const file = ev.target.files[0];
+  ev.target.value = '';
+  if (!file) return;
+  try {
+    const entries = entriesFromBackup(JSON.parse(await file.text()));
+    const r = await store.save(entries, { replace: $('#backup-replace').checked });
+    await loadEntries();
+    renderMore();
+    toast(`Restored ${r.saved}${r.skipped ? ` · ${r.skipped} duplicates skipped` : ''}`);
+  } catch (err) { toast(err.message); }
+});
+$('#wipe').addEventListener('click', async () => {
+  if (!confirm('Delete EVERYTHING in your vault on this device? Export a backup first if you might want it back.')) return;
+  await store.clear();
+  await loadEntries();
+  renderMore();
+  toast('Vault emptied');
+});
+
+// Install as an app (Windows / Android / ChromeOS / macOS via Chrome or Edge).
+let installPrompt = null;
+window.addEventListener('beforeinstallprompt', (ev) => {
+  ev.preventDefault();
+  installPrompt = ev;
+  $('#install').hidden = false;
+});
+$('#install').addEventListener('click', async () => {
+  if (!installPrompt) return;
+  installPrompt.prompt();
+  await installPrompt.userChoice;
+  installPrompt = null;
+  $('#install').hidden = true;
+});
+window.addEventListener('appinstalled', () => toast('Homebrew Vault installed'));
+
+if ('serviceWorker' in navigator && location.protocol !== 'file:') {
+  navigator.serviceWorker.register('sw.js').catch(() => { /* offline support is optional */ });
+}
+
+// Android "Share → Homebrew Vault" lands here as ?url=…&text=…
+function handleShareTarget() {
+  const params = new URLSearchParams(location.search);
+  const shared = params.get('url') || (params.get('text') || '').match(/https?:\/\/\S+/)?.[0];
+  if (!shared) return false;
+  history.replaceState(null, '', appUrl() + '#import');
+  $('#import-url').value = shared;
+  setTimeout(() => $('#import-go').click(), 0);
+  return true;
+}
+
+(async () => {
+  try {
+    store = await openStore();
+    await loadEntries();
+  } catch (err) {
+    toast(`Could not open your vault: ${err.message}`);
+  }
+  handleShareTarget();
+  route();
+})();

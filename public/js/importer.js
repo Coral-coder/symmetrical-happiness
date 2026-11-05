@@ -1,4 +1,5 @@
 // Turns webpages (or pasted text) into spell / item / monster entries.
+// Runs entirely in the browser: it only needs a global DOMParser.
 //
 // Three strategies run over every page and their results are merged:
 //   1. Embedded JSON  - e.g. Next.js __NEXT_DATA__, JSON-LD, raw JSON APIs.
@@ -6,7 +7,12 @@
 //   3. Text stat blocks - "3rd-level evocation / Casting Time: ..." style
 //      write-ups, "Wondrous item, rare" items and "Medium humanoid, ..."
 //      monsters. Also used for pasted text and Homebrewery markdown.
-import * as cheerio from 'cheerio';
+
+function parseDoc(html) {
+  return new DOMParser().parseFromString(String(html), 'text/html');
+}
+const text = (el) => (el ? el.textContent || '' : '');
+const cellsOf = (row) => Array.from(row.children).filter((c) => /^(TD|TH)$/i.test(c.tagName));
 
 export const SCHOOLS = [
   'Abjuration', 'Conjuration', 'Divination', 'Enchantment',
@@ -65,9 +71,10 @@ function htmlFragmentToText(s) {
   if (s == null) return '';
   const str = String(s);
   if (!/[<&]/.test(str)) return str.trim();
-  const $ = cheerio.load(`<div id="x">${str.replace(/<br\s*\/?>/gi, '\n')}</div>`);
-  $('#x').find('p,div,li').each((_, el) => { $(el).append('\n'); });
-  return $('#x').text().replace(/\n{3,}/g, '\n\n').trim();
+  const doc = parseDoc(`<div id="x">${str.replace(/<br\s*\/?>/gi, '\n')}</div>`);
+  const root = doc.getElementById('x');
+  root.querySelectorAll('p,div,li').forEach((el) => el.append('\n'));
+  return text(root).replace(/\n{3,}/g, '\n\n').trim();
 }
 
 /** Strip Homebrewery / markdown decoration from a line of text. */
@@ -227,11 +234,11 @@ export function entriesFromJson(data) {
   return out;
 }
 
-function jsonFromHtml($) {
+function jsonFromHtml(doc) {
   const out = [];
-  $('script[type="application/json"], script[type="application/ld+json"], script#__NEXT_DATA__, script#__NUXT_DATA__').each((_, el) => {
+  doc.querySelectorAll('script[type="application/json"], script[type="application/ld+json"], script#__NEXT_DATA__, script#__NUXT_DATA__').forEach((el) => {
     try {
-      out.push(...entriesFromJson(JSON.parse($(el).text())));
+      out.push(...entriesFromJson(JSON.parse(text(el))));
     } catch { /* not JSON */ }
   });
   return out;
@@ -270,34 +277,35 @@ function headerField(h) {
 }
 
 /** Label a table with nearby context, e.g. the wikidot tab name ("3rd Level", "Rare"). */
-function tableContext($, table) {
-  let node = $(table);
-  for (let depth = 0; depth < 8 && node.length; depth++) {
-    const id = node.attr('id') || '';
-    const tab = /^wiki-tab-\d+-(\d+)$/.exec(id);
+function tableContext(table) {
+  let node = table;
+  for (let depth = 0; depth < 8 && node && node.nodeType === 1; depth++) {
+    const tab = /^wiki-tab-\d+-(\d+)$/.exec(node.id || '');
     if (tab) {
-      const label = node.closest('.yui-navset').find('.yui-nav li').eq(Number(tab[1])).text();
+      const nav = node.closest('.yui-navset');
+      const label = nav ? text(nav.querySelectorAll('.yui-nav li')[Number(tab[1])]) : '';
       if (label) return clean(label);
     }
-    const heading = node.prevAll('h1,h2,h3,h4,h5,h6').first();
-    if (heading.length) return clean(heading.text());
-    node = node.parent();
+    for (let sib = node.previousElementSibling; sib; sib = sib.previousElementSibling) {
+      if (/^H[1-6]$/i.test(sib.tagName)) return clean(text(sib));
+    }
+    node = node.parentElement;
   }
   return '';
 }
 
-function entriesFromTables($, baseUrl) {
+function entriesFromTables(doc, baseUrl) {
   const out = [];
-  $('table').each((_, table) => {
-    const rows = $(table).find('tr').toArray();
+  doc.querySelectorAll('table').forEach((table) => {
+    const rows = Array.from(table.querySelectorAll('tr')).filter((r) => r.closest('table') === table);
     if (rows.length < 2) return;
-    const headerIdx = rows.findIndex((r) => $(r).find('th').length >= 2);
+    const headerIdx = rows.findIndex((r) => cellsOf(r).filter((c) => /^TH$/i.test(c.tagName)).length >= 2);
     const hIdx = headerIdx === -1 ? 0 : headerIdx;
-    const headers = $(rows[hIdx]).find('th,td').toArray().map((c) => headerField($(c).text()));
+    const headers = cellsOf(rows[hIdx]).map((c) => headerField(text(c)));
     const nameCol = headers.indexOf('name');
     if (nameCol === -1) return;
     const hs = new Set(headers);
-    const rawHeader = clean($(rows[hIdx]).text()).toLowerCase();
+    const rawHeader = clean(text(rows[hIdx])).toLowerCase();
     let kind = null;
     if (hs.has('school') || hs.has('casting_time') || hs.has('components') || /spell/.test(rawHeader)) kind = 'spell';
     else if (hs.has('cr') || hs.has('hit_points') || hs.has('armor_class') || /monster|creature/.test(rawHeader)) kind = 'monster';
@@ -305,24 +313,24 @@ function entriesFromTables($, baseUrl) {
     if (!kind) return;
 
     let used = false;
-    const context = tableContext($, table);
+    const context = tableContext(table);
     const ctxLevel = parseLevel(context);
     const ctxRarity = normRarity(context);
 
     for (const row of rows.slice(hIdx + 1)) {
-      const cells = $(row).find('td,th').toArray();
-      if (cells.length < 2) continue;
-      const nameCell = $(cells[nameCol]);
-      const name = clean(nameCell.text());
+      const cells = cellsOf(row);
+      if (cells.length < 2 || !cells[nameCol]) continue;
+      const nameCell = cells[nameCol];
+      const name = clean(text(nameCell));
       if (!name) continue;
       const e = { kind, name };
-      const href = nameCell.find('a[href]').attr('href');
+      const href = nameCell.querySelector('a[href]')?.getAttribute('href');
       if (href && !href.startsWith('javascript:') && !href.startsWith('#')) {
         try { e.source_url = new URL(href, baseUrl).href; } catch { /* ignore */ }
       }
       headers.forEach((f, i) => {
         if (!f || f === 'name' || !cells[i]) return;
-        const v = clean($(cells[i]).text());
+        const v = clean(text(cells[i]));
         if (!v || v === '-' || v === '—') return;
         if (f === 'type') {
           if (kind === 'item') e.item_type = titleCase(v);
@@ -348,7 +356,7 @@ function entriesFromTables($, baseUrl) {
       used = true;
     }
     // Tables we understood are skipped by the text parser.
-    if (used) $(table).attr('data-hv-parsed', '1');
+    if (used) table.setAttribute('data-hv-parsed', '1');
   });
   return out;
 }
@@ -356,15 +364,16 @@ function entriesFromTables($, baseUrl) {
 // --------------------------------------------------- 3. text stat blocks
 
 /** Flatten an HTML element into trimmed, non-empty lines. */
-export function htmlToLines($, root) {
-  const r = $(root).clone();
-  r.find('script,style,noscript,nav,header,footer,iframe,svg,form,button,select,.yui-nav,table[data-hv-parsed]').remove();
-  r.find('br').replaceWith('\n');
-  r.find('p,div,li,tr,h1,h2,h3,h4,h5,h6,dt,dd,section,article,blockquote,pre,ul,ol,table').each((_, el) => {
-    $(el).prepend('\n').append('\n');
+export function htmlToLines(root) {
+  const r = root.cloneNode(true);
+  r.querySelectorAll('script,style,noscript,nav,header,footer,iframe,svg,form,button,select,.yui-nav,table[data-hv-parsed]').forEach((el) => el.remove());
+  r.querySelectorAll('br').forEach((el) => el.replaceWith('\n'));
+  r.querySelectorAll('p,div,li,tr,h1,h2,h3,h4,h5,h6,dt,dd,section,article,blockquote,pre,ul,ol,table').forEach((el) => {
+    el.prepend('\n');
+    el.append('\n');
   });
-  r.find('td,th').append(' ');
-  return textToLines(r.text());
+  r.querySelectorAll('td,th').forEach((el) => el.append(' '));
+  return textToLines(text(r));
 }
 
 export function textToLines(text) {
@@ -575,25 +584,28 @@ export function dedupe(entries) {
 
 // ---------------------------------------------------------- public API
 
-/** Parse a full HTML document. */
+/** Parse a full HTML document (fetched, pasted from the clipboard, or sent by the bookmarklet). */
 export function parseHtml(html, { url = '' } = {}) {
-  const $ = cheerio.load(html);
-  const title = cleanPageTitle($('#page-title').text() || $('meta[property="og:title"]').attr('content') || $('title').text() || $('h1').first().text());
-  const site = $('meta[property="og:site_name"]').attr('content') || (url ? new URL(url).hostname.replace(/^www\./, '') : '');
+  const doc = parseDoc(html);
+  const meta = (sel) => doc.querySelector(sel)?.getAttribute('content') || '';
+  const title = cleanPageTitle(text(doc.getElementById('page-title')) || meta('meta[property="og:title"]') || text(doc.querySelector('title')) || text(doc.querySelector('h1')));
+  let host = '';
+  try { host = url ? new URL(url).hostname.replace(/^www\./, '') : ''; } catch { /* ignore */ }
+  const site = meta('meta[property="og:site_name"]') || host;
   const root = ['#page-content', '.brewRenderer', 'main', 'article', '[role=main]', '#content', 'body']
-    .map((s) => $(s).first())
-    .find((n) => n.length) || $.root();
+    .map((sel) => doc.querySelector(sel))
+    .find(Boolean) || doc.documentElement;
 
-  const fromJson = jsonFromHtml($);
-  const fromTables = entriesFromTables($, url || undefined);
-  const fromText = entriesFromLines(htmlToLines($, root), { fallbackName: title });
+  const fromJson = jsonFromHtml(doc);
+  const fromTables = entriesFromTables(doc, url || undefined); // must run before htmlToLines
+  const fromText = entriesFromLines(htmlToLines(root), { fallbackName: title });
 
   return { title, site: clean(site), entries: dedupe([...fromJson, ...fromText, ...fromTables]) };
 }
 
-/** Parse pasted text (plain text or Homebrewery/markdown) or JSON. */
-export function parseText(text) {
-  const t = String(text || '').trim();
+/** Parse pasted text (plain text or Homebrewery/markdown), HTML or JSON. */
+export function parseText(input) {
+  const t = String(input || '').trim();
   if (/^[[{]/.test(t)) {
     try { return dedupe(entriesFromJson(JSON.parse(t))); } catch { /* fall through */ }
   }
@@ -601,19 +613,51 @@ export function parseText(text) {
   return dedupe(entriesFromLines(textToLines(t)));
 }
 
+/** Pull the markdown out of a Homebrewery /source/<id> page. */
+export function parseHomebrewerySource(body) {
+  const md = /<code[^>]*>/i.test(body) ? text(parseDoc(body).querySelector('code')) : body;
+  const title = cleanPageTitle(/^#\s+(.+)$/m.exec(md)?.[1] || '');
+  return { title, site: 'The Homebrewery', entries: dedupe(entriesFromLines(textToLines(md))) };
+}
+
 // --------------------------------------------------------- fetching
+//
+// A web page can only read another site if that site allows it (CORS), so
+// fetches go direct first and then fall back to public CORS proxies. The
+// proxy list is configurable in Settings.
 
-const UA = 'Mozilla/5.0 (compatible; HomebrewVault/1.0; personal homebrew tracker)';
+export const DEFAULT_PROXIES = [
+  'https://corsproxy.io/?url={url}',
+  'https://api.allorigins.win/raw?url={url}',
+  'https://api.codetabs.com/v1/proxy/?quest={url}',
+];
 
-async function fetchText(url) {
-  const res = await fetch(url, {
-    headers: { 'User-Agent': UA, Accept: 'text/html,application/json;q=0.9,*/*;q=0.8' },
-    redirect: 'follow',
-    signal: AbortSignal.timeout(20000),
-  });
-  if (!res.ok) throw new Error(`${url} responded ${res.status} ${res.statusText}`);
-  const type = res.headers.get('content-type') || '';
-  return { body: await res.text(), type, finalUrl: res.url || url };
+let preferredRoute = null; // the route that worked last time, tried first
+
+export function makeFetcher({ proxies = DEFAULT_PROXIES, timeoutMs = 20000, fetchImpl = (...a) => fetch(...a) } = {}) {
+  const routes = [null, ...proxies.filter(Boolean)]; // null = direct
+  return async function fetchText(url) {
+    const order = preferredRoute !== null && routes.includes(preferredRoute)
+      ? [preferredRoute, ...routes.filter((r) => r !== preferredRoute)]
+      : routes;
+    const errors = [];
+    for (const route of order) {
+      const target = route ? route.replace('{url}', encodeURIComponent(url)) : url;
+      try {
+        const res = await fetchImpl(target, { signal: AbortSignal.timeout(timeoutMs) });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const body = await res.text();
+        if (!body.trim()) throw new Error('empty response');
+        preferredRoute = route;
+        return { body, type: res.headers.get('content-type') || '', finalUrl: url };
+      } catch (err) {
+        errors.push(`${route ? new URL(target).hostname : 'direct'}: ${err.message}`);
+      }
+    }
+    const e = new Error(`Couldn't read ${url}. Tried ${errors.join('; ')}.`);
+    e.blocked = true;
+    throw e;
+  };
 }
 
 /** Rewrite share links to URLs that return the raw content. */
@@ -628,25 +672,23 @@ export function resolveSpecialUrl(url) {
 }
 
 async function mapLimit(items, limit, fn) {
-  const results = new Array(items.length);
   let next = 0;
   const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
     while (next < items.length) {
       const i = next++;
-      try { results[i] = await fn(items[i], i); } catch (err) { results[i] = { error: err }; }
+      await fn(items[i], i);
     }
   });
   await Promise.all(workers);
-  return results;
 }
 
 /**
  * Fetch a URL and extract entries.
  * @param {string} url
- * @param {{followLinks?: boolean, maxLinks?: number}} opts  followLinks visits
- *   each entry's own page (same site only) to pull in full descriptions.
+ * @param {{followLinks?: boolean, maxLinks?: number, fetchText?: Function, onProgress?: Function}} opts
+ *   followLinks visits each entry's own page (same site only) to pull in full descriptions.
  */
-export async function importFromUrl(url, { followLinks = false, maxLinks = 500 } = {}) {
+export async function importFromUrl(url, { followLinks = false, maxLinks = 500, fetchText = makeFetcher(), onProgress = () => {} } = {}) {
   let parsed;
   try { parsed = new URL(url); } catch { throw new Error('That does not look like a valid URL.'); }
   if (!/^https?:$/.test(parsed.protocol)) throw new Error('Only http:// and https:// URLs can be imported.');
@@ -657,44 +699,41 @@ export async function importFromUrl(url, { followLinks = false, maxLinks = 500 }
   let result;
 
   if (special.mode === 'homebrewery') {
-    const $ = cheerio.load(body);
-    const md = $('code').text() || body;
-    let title = '';
-    try {
-      const share = await fetchText(parsed.href);
-      title = cleanPageTitle(cheerio.load(share.body)('title').text());
-    } catch { /* title is optional */ }
-    if (!title || /^the homebrewery$/i.test(title)) title = cleanPageTitle(/^#\s+(.+)$/m.exec(md)?.[1] || '');
-    result = { title, site: 'The Homebrewery', entries: dedupe(entriesFromLines(textToLines(md))) };
-  } else if (/json/.test(type)) {
-    result = { title: '', site: parsed.hostname, entries: dedupe(entriesFromJson(JSON.parse(body))) };
+    result = parseHomebrewerySource(body);
+  } else if (/json/.test(type) || /^\s*[[{]/.test(body)) {
+    let data = null;
+    try { data = JSON.parse(body); } catch { /* not JSON after all */ }
+    result = data ? { title: '', site: parsed.hostname, entries: dedupe(entriesFromJson(data)) } : parseHtml(body, { url: finalUrl });
   } else {
     result = parseHtml(body, { url: finalUrl });
   }
+  for (const e of result.entries) if (!e.source_url) e.source_url = parsed.href;
 
   if (followLinks) {
     const host = new URL(finalUrl).hostname;
-    const todo = result.entries.filter((e) => e.source_url && !e.description && new URL(e.source_url).hostname === host);
+    const todo = result.entries.filter((e) => e.source_url && e.source_url !== parsed.href && !e.description && new URL(e.source_url).hostname === host);
     if (todo.length > maxLinks) warnings.push(`Only fetched details for the first ${maxLinks} of ${todo.length} linked pages.`);
     const batch = todo.slice(0, maxLinks);
     let failed = 0;
-    await mapLimit(batch, 6, async (e) => {
+    let done = 0;
+    await mapLimit(batch, 4, async (e) => {
       try {
         const page = await fetchText(e.source_url);
         const sub = parseHtml(page.body, { url: page.finalUrl });
         const match = sub.entries.find((x) => x.kind === e.kind && x.name.toLowerCase() === e.name.toLowerCase())
           || sub.entries.find((x) => x.kind === e.kind);
         if (match) {
-          const { name, ...rest } = match;
+          const { name, source_url: _u, ...rest } = match;
           mergeInto(e, rest);
         }
       } catch { failed++; }
+      onProgress(++done, batch.length);
     });
     if (failed) warnings.push(`${failed} linked page(s) could not be fetched.`);
   }
 
   if (!result.entries.length) {
-    warnings.push('No spells, items or monsters were recognised on that page. If the site builds its content with JavaScript or blocks bots, open it in your browser, copy the text, and use "Paste text" instead.');
+    warnings.push('No spells, items or monsters were recognised on that page. If the site builds its content with JavaScript, open it in your browser and use the bookmarklet, or copy the page and use "Paste".');
   }
   return { ...result, url: finalUrl, warnings };
 }
