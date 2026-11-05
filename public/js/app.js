@@ -68,6 +68,12 @@ const settings = {
       return v;
     } catch { return DEFAULT_PROXIES; }
   },
+  get jinaKey() {
+    try { return localStorage.getItem('hv-jina-key') || ''; } catch { return ''; }
+  },
+  set jinaKey(v) {
+    try { if (v) localStorage.setItem('hv-jina-key', v); else localStorage.removeItem('hv-jina-key'); } catch { /* ignore */ }
+  },
   set proxies(v) {
     try { localStorage.setItem('hv-proxies', JSON.stringify(v)); } catch { /* ignore */ }
   },
@@ -566,8 +572,13 @@ $('#import-form').addEventListener('submit', async (ev) => {
     if (importMode === 'url') {
       res = await importFromUrl(url, {
         followLinks,
-        fetchText: makeFetcher({ proxies: settings.proxies }),
-        onProgress: (n, total) => { btn.innerHTML = `<span class="spinner"></span> Reading linked pages ${n}/${total}…`; },
+        fetchText: makeFetcher({ proxies: settings.proxies, jinaKey: settings.jinaKey }),
+        // Jina's free tier allows ~20 pages a minute without a key.
+        paceMs: settings.jinaKey ? 150 : 3100,
+        onProgress: (n, total, secsLeft) => {
+          const left = secsLeft > 90 ? `about ${Math.round(secsLeft / 60)} min left` : secsLeft > 5 ? `about ${secsLeft}s left` : 'almost done';
+          btn.innerHTML = `<span class="spinner"></span> Reading linked pages ${n}/${total} (${left})…`;
+        },
       });
       if (!res.entries.length) {
         // Usually a bot check or a page built by JavaScript: offer the copy route.
@@ -763,6 +774,7 @@ function renderMore() {
   $('#bookmarklet').href = bookmarkletCode();
   $('#bookmarklet-code').value = bookmarkletCode();
   $('#proxies').value = settings.proxies.join('\n');
+  $('#jina-key').value = settings.jinaKey;
   const total = Object.values(state.entries).reduce((n, l) => n + l.length, 0);
   $('#vault-size').textContent = `${total} ${total === 1 ? 'entry' : 'entries'} stored in this browser.`;
 }
@@ -776,7 +788,8 @@ $('#copy-bookmarklet').addEventListener('click', async () => {
 });
 $('#save-proxies').addEventListener('click', () => {
   settings.proxies = $('#proxies').value.split('\n').map((l) => l.trim()).filter(Boolean);
-  toast('Proxy list saved');
+  settings.jinaKey = $('#jina-key').value.trim();
+  toast('Import settings saved');
 });
 $('#reset-proxies').addEventListener('click', () => {
   settings.proxies = DEFAULT_PROXIES;

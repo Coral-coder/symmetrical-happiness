@@ -638,57 +638,69 @@ const PROXY_BLOCKED = [/(^|\.)wikidot\.com$/i, /(^|\.)dndbeyond\.com$/i];
 
 let preferredRoute = null; // the route that worked last time, tried first
 
-function routeRequest(route, url) {
+function routeRequest(route, url, jinaKey = '') {
   if (!route) return { target: url, headers: {} };
   const target = route.replace('{rawurl}', url).replace('{url}', encodeURIComponent(url));
-  // Jina Reader returns the rendered page when asked for HTML.
-  const headers = /^https:\/\/r\.jina\.ai\//.test(target) ? { 'X-Respond-With': 'html' } : {};
+  const headers = {};
+  if (/^https:\/\/r\.jina\.ai\//.test(target)) {
+    // Jina Reader returns the page's HTML when asked; a free key raises its rate limit.
+    headers['X-Respond-With'] = 'html';
+    if (jinaKey) headers.Authorization = `Bearer ${jinaKey}`;
+  }
   return { target, headers };
 }
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /**
  * Build a fetchText(url) function. It tries a direct request first (works when
  * the site allows cross-origin reads), then races all proxies at once and
  * uses whichever answers first with real content.
  */
-export function makeFetcher({ proxies = DEFAULT_PROXIES, timeoutMs = 25000, retryDelayMs = 1500, fetchImpl = (...a) => fetch(...a) } = {}) {
+export function makeFetcher({ proxies = DEFAULT_PROXIES, timeoutMs = 25000, retryDelayMs = 1500, jinaKey = '', fetchImpl = (...a) => fetch(...a) } = {}) {
   const list = proxies.filter(Boolean);
 
   const attempt = async (route, url) => {
-    const { target, headers } = routeRequest(route, url);
+    const { target, headers } = routeRequest(route, url, jinaKey);
     const label = route ? new URL(target).hostname : 'direct';
     try {
       const res = await fetchImpl(target, { headers, signal: AbortSignal.timeout(route ? timeoutMs : 10000) });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (!res.ok) throw Object.assign(new Error(res.status === 429 ? 'rate limited' : `HTTP ${res.status}`), { status: res.status });
       const body = await res.text();
       if (!body.trim()) throw new Error('empty response');
       // Some proxies answer 200 with an error document.
       if (/^\s*\{\s*"(data"\s*:\s*null|error|status"\s*:\s*"fail)/.test(body.slice(0, 200))) throw new Error('proxy error');
       return { route, result: { body, type: res.headers.get('content-type') || '', finalUrl: url } };
     } catch (err) {
-      const e = new Error(`${label}: ${err.name === 'TimeoutError' ? 'timed out' : err.message}`);
-      throw e;
+      throw Object.assign(new Error(`${label}: ${err.name === 'TimeoutError' ? 'timed out' : err.message}`), { status: err.status });
     }
   };
 
   return async function fetchText(url) {
     const errors = [];
+    let rateLimited = false;
     const tryList = async (routes) => {
       if (!routes.length) return null;
       try {
         return await Promise.any(routes.map((r) => attempt(r, url)));
       } catch (agg) {
-        errors.push(...(agg.errors || [agg]).map((e) => e.message));
+        for (const e of agg.errors || [agg]) {
+          errors.push(e.message);
+          if (e.status === 429) rateLimited = true;
+        }
         return null;
       }
     };
     const first = preferredRoute && list.includes(preferredRoute) ? [preferredRoute] : [];
-    let hit = (await tryList([null]))
-      || (await tryList(first))
+    // The route that worked last time goes first; then direct; then the rest.
+    let hit = (await tryList(first))
+      || (await tryList([null]))
       || (await tryList(list.filter((r) => !first.includes(r))));
-    if (!hit && list.length && retryDelayMs >= 0) {
-      // Free proxies are flaky; one more round after a short pause often works.
-      await new Promise((r) => setTimeout(r, retryDelayMs));
+    // Free proxies are flaky and rate-limited: retry with growing pauses
+    // (longer when a proxy said "too many requests").
+    for (let round = 1; !hit && list.length && retryDelayMs >= 0 && round <= 3; round++) {
+      await sleep(retryDelayMs * round * (rateLimited ? 4 : 1));
+      rateLimited = false;
       hit = await tryList(list);
     }
     if (hit) {
@@ -734,7 +746,9 @@ async function mapLimit(items, limit, fn) {
  * @param {{followLinks?: boolean, maxLinks?: number, fetchText?: Function, onProgress?: Function}} opts
  *   followLinks visits each entry's own page (same site only) to pull in full descriptions.
  */
-export async function importFromUrl(url, { followLinks = false, maxLinks = 500, fetchText = makeFetcher(), onProgress = () => {} } = {}) {
+export async function importFromUrl(url, {
+  followLinks = false, maxLinks = 500, paceMs = 0, fetchText = makeFetcher(), onProgress = () => {},
+} = {}) {
   let parsed;
   try { parsed = new URL(url); } catch { throw new Error('That does not look like a valid URL.'); }
   if (!/^https?:$/.test(parsed.protocol)) throw new Error('Only http:// and https:// URLs can be imported.');
@@ -762,9 +776,22 @@ export async function importFromUrl(url, { followLinks = false, maxLinks = 500, 
     const batch = todo.slice(0, maxLinks);
     let failed = 0;
     let done = 0;
-    await mapLimit(batch, 4, async (e) => {
+    // paceMs spaces out request starts to stay under a proxy's rate limit.
+    let nextStart = 0;
+    await mapLimit(batch, paceMs ? 2 : 3, async (e) => {
+      if (paceMs) {
+        const wait = Math.max(0, nextStart - Date.now());
+        nextStart = Math.max(Date.now(), nextStart) + paceMs;
+        if (wait) await sleep(wait);
+      }
       try {
-        const page = await fetchText(e.source_url);
+        let page;
+        try {
+          page = await fetchText(e.source_url);
+        } catch {
+          await sleep(5000); // likely rate limited: give it one more go
+          page = await fetchText(e.source_url);
+        }
         const sub = parseHtml(page.body, { url: page.finalUrl });
         const match = sub.entries.find((x) => x.kind === e.kind && x.name.toLowerCase() === e.name.toLowerCase())
           || sub.entries.find((x) => x.kind === e.kind);
@@ -773,7 +800,7 @@ export async function importFromUrl(url, { followLinks = false, maxLinks = 500, 
           mergeInto(e, rest);
         }
       } catch { failed++; }
-      onProgress(++done, batch.length);
+      onProgress(++done, batch.length, Math.round(((batch.length - done) * Math.max(paceMs, 400)) / 1000));
     });
     if (failed) warnings.push(`${failed} linked page(s) could not be fetched.`);
   }

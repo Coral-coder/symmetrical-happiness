@@ -218,7 +218,7 @@ test('fetcher falls back to the next proxy when direct fetch is blocked', async 
   // The proxy that worked is tried first next time.
   calls.length = 0;
   await fetchText('https://example.com/c');
-  assert.deepEqual(calls, ['https://example.com/c', 'https://p2.test/https://example.com/c']);
+  assert.deepEqual(calls, ['https://p2.test/https://example.com/c']);
 });
 
 test('fetcher reports every route when all fail', async () => {
@@ -270,4 +270,18 @@ test('fetcher retries the proxies once after a failed round', async () => {
   };
   const fetchText = makeFetcher({ proxies: ['https://retry-proxy.test/{rawurl}'], retryDelayMs: 1, fetchImpl });
   assert.equal((await fetchText('https://flaky.example/x')).body, '<p>ok now</p>');
+});
+
+test('Jina route asks for HTML and sends the optional API key', async () => {
+  const seen = [];
+  const fetchImpl = async (url, opts) => {
+    seen.push([url, opts.headers]);
+    if (!url.startsWith('https://r.jina.ai/')) throw new TypeError('Failed to fetch');
+    return fakeResponse('<p>via jina</p>');
+  };
+  const fetchText = makeFetcher({ proxies: ['https://r.jina.ai/{rawurl}'], jinaKey: 'jina_abc', fetchImpl });
+  await fetchText('https://jina-test.example/page');
+  const [, headers] = seen.find(([u]) => u === 'https://r.jina.ai/https://jina-test.example/page');
+  assert.equal(headers['X-Respond-With'], 'html');
+  assert.equal(headers.Authorization, 'Bearer jina_abc');
 });

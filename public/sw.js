@@ -2,7 +2,7 @@
 // are served network-first, so updates show up straight away when online,
 // with the cache as the fallback when offline. Cross-origin requests (page
 // imports) are never touched.
-const CACHE = 'homebrew-vault-v3';
+const CACHE = 'homebrew-vault-v4';
 const SHELL = [
   './',
   'index.html',

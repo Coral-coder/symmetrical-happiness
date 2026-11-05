@@ -32,12 +32,16 @@ In your browser's IndexedDB on that device. Nothing is uploaded anywhere. Use **
 
 ## Importing from URLs and CORS
 
-Browsers only let a web app read another website if that site allows it (CORS). Most D&D sites don't, so URL imports
-go through a CORS proxy. A few public ones are preconfigured, but free proxies are often rate-limited or down.
-For imports that just work, deploy your own free proxy on Cloudflare Workers with
-[`proxy/cloudflare-worker.js`](proxy/cloudflare-worker.js). Setup instructions are at the top of the file. Then put its URL first under **⚙ More → Import proxies**.
+Browsers only let a web app read another website if that site allows it (CORS), and most D&D sites don't.
+So URL imports go through [Jina Reader](https://jina.ai/reader/) (`r.jina.ai`). It's free, allows browser
+requests, and returns the full page, including hidden tabs on wikidot lists. A couple of other public
+proxies are kept as fallbacks. The app tries every route at once and retries with a pause if they all fail.
 
-The **bookmarklet** and **Paste** never need a proxy.
+- Without a key, Jina allows about 20 pages a minute. That's plenty for normal imports. "Open each linked entry" is
+  paced to fit, and shows the time left. A free key from jina.ai (paste it under **⚙ More**) raises the limit a lot.
+- If a site still can't be read, the app explains how to copy the page and use **📋 Paste from clipboard**, or the
+  **bookmarklet**. Neither needs a proxy. Copying only grabs visible content, so on tabbed pages use the bookmarklet.
+- To run your own proxy instead, see [`proxy/cloudflare-worker.js`](proxy/cloudflare-worker.js).
 
 ## Publishing on GitHub Pages
 

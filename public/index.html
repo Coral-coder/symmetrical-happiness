@@ -71,7 +71,7 @@
               <input type="url" id="import-url" placeholder="https://dnd5e.wikidot.com/spells:wizard" autocomplete="off">
             </label>
             <label class="check"><input type="checkbox" id="follow-links">
-              Also open each linked entry to grab full descriptions <small>(slower; useful for list pages like wikidot)</small></label>
+              Also open each linked entry to grab full descriptions <small>(useful for list pages like wikidot; about 20 pages a minute, faster with a free Jina key in ⚙ More)</small></label>
             <p class="hint">Works with stat-block pages, spell/item/monster list tables, sites that embed their data as JSON
               (like mythical.ink), and Homebrewery share links. Some sites refuse to be read from another page;
               for those use the <a href="#more">bookmarklet</a> or copy &amp; paste. Try:
@@ -193,10 +193,14 @@
           <h2>Import proxies</h2>
           <p>Webpages are fetched directly when the site allows it. Otherwise, they go through these public CORS proxies, tried in order.
             <code>{url}</code> is replaced by the page address. Pages you import are sent to these services.</p>
-          <p class="hint">Free public proxies are often rate-limited or down. For reliable imports, host your own free one on
+          <p class="hint">Jina Reader (first in the list) handles most sites, wikidot included. Other free proxies are often rate-limited or down. For reliable imports, host your own free one on
             Cloudflare Workers using <a href="https://github.com/coral-coder/symmetrical-happiness/blob/main/proxy/cloudflare-worker.js" target="_blank" rel="noopener">proxy/cloudflare-worker.js</a>
             (5-minute setup) and put its URL first in this list. The bookmarklet and Paste never need a proxy.</p>
           <textarea id="proxies" rows="4"></textarea>
+          <label class="field" style="margin-top:12px">
+            <span>Jina API key <small>(optional, free at jina.ai: lifts the limit of ~20 pages a minute, handy for "open each linked entry")</small></span>
+            <input type="text" id="jina-key" placeholder="jina_…" autocomplete="off" spellcheck="false">
+          </label>
           <div class="toolbar-right" style="margin-top:8px">
             <button class="btn" id="reset-proxies">Reset</button>
             <button class="btn primary" id="save-proxies">Save</button>
