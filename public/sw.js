@@ -2,7 +2,7 @@
 // are served network-first, so updates show up straight away when online,
 // with the cache as the fallback when offline. Cross-origin requests (page
 // imports) are never touched.
-const CACHE = 'homebrew-vault-v4';
+const CACHE = 'homebrew-vault-v5';
 const SHELL = [
   './',
   'index.html',
@@ -10,8 +10,20 @@ const SHELL = [
   'js/app.js',
   'js/importer.js',
   'js/store.js',
+  'js/screen.js',
   'manifest.webmanifest',
-  'img/dm-screen.jpg',
+  'img/screens/fitz-1.webp',
+  'img/screens/fitz-1-thumb.webp',
+  'img/screens/fitz-2.webp',
+  'img/screens/fitz-2-thumb.webp',
+  'img/screens/fitz-3.webp',
+  'img/screens/fitz-3-thumb.webp',
+  'img/screens/fitz-4.webp',
+  'img/screens/fitz-4-thumb.webp',
+  'img/screens/fitz-5.webp',
+  'img/screens/fitz-5-thumb.webp',
+  'img/screens/fitz-6.webp',
+  'img/screens/fitz-6-thumb.webp',
   'icons/icon.svg',
   'icons/icon-192.png',
   'icons/icon-512.png',

@@ -134,17 +134,46 @@
 
     <!-- DM screen -->
     <section id="screen" class="view" hidden>
-      <div class="toolbar">
-        <p class="muted">Quick reference. Drag to pan, use the buttons to zoom.</p>
-        <div class="toolbar-right">
-          <button class="btn" data-zoom="1">Fit</button>
-          <button class="btn" data-zoom="2">2×</button>
-          <button class="btn" data-zoom="3">3×</button>
-          <a class="btn" href="img/dm-screen.jpg" target="_blank" rel="noopener">Open image</a>
+      <div class="screen-head">
+        <div class="page-strip" id="screen-pages" aria-label="Screen pages"></div>
+        <div class="screen-side">
+          <label class="btn primary" id="screen-upload-label">＋ Add images or PDF <input type="file" id="screen-upload" accept="image/*,application/pdf,.pdf" multiple hidden></label>
+          <label class="check"><input type="checkbox" id="screen-builtin" checked> Show built-in screen</label>
         </div>
       </div>
-      <div class="screen-wrap" id="screen-wrap">
-        <img src="img/dm-screen.jpg" alt="DM screen: character advancement, conditions, actions in combat, armor, weapons, cover, travel pace, damage types, and more" id="screen-img" draggable="false">
+
+      <div class="screen-empty empty" id="screen-empty" hidden>
+        <p class="empty-title">No screen pages</p>
+        <p>Add your own images or a PDF above, or tick <b>Show built-in screen</b>.</p>
+      </div>
+
+      <div id="screen-viewer" class="screen-viewer">
+        <div class="toolbar screen-toolbar">
+          <div class="toolbar-right">
+            <button class="btn" id="screen-prev" aria-label="Previous page">◀</button>
+            <button class="btn" id="screen-next" aria-label="Next page">▶</button>
+            <span class="zoom-group">
+              <button class="btn" data-zoom="1">Fit</button>
+              <button class="btn" data-zoom="1.5">1.5×</button>
+              <button class="btn" data-zoom="2">2×</button>
+              <button class="btn" data-zoom="3">3×</button>
+            </span>
+            <button class="btn" id="screen-full">⛶ Full screen</button>
+            <a class="btn" id="screen-open" target="_blank" rel="noopener">Open image</a>
+          </div>
+          <div class="toolbar-right" id="screen-own-actions" hidden>
+            <button class="btn" id="screen-left" title="Move earlier">⇠ Move</button>
+            <button class="btn" id="screen-right" title="Move later">Move ⇢</button>
+            <button class="btn" id="screen-rename">✎ Rename</button>
+            <button class="btn danger" id="screen-delete">🗑 Delete</button>
+          </div>
+        </div>
+        <div class="screen-wrap" id="screen-wrap">
+          <img id="screen-img" alt="" draggable="false">
+        </div>
+        <p class="hint">Double-tap or double-click to zoom in on a spot. Ctrl + scroll to zoom on a computer.</p>
+        <p class="hint" id="screen-credit">Built-in screen: <b>Fitz's 5e DM Screen</b>, a free fan-made reference.
+          <a href="img/screens/fitz-5e-dm-screen.pdf" target="_blank" rel="noopener">Download the printable PDF</a>.</p>
       </div>
     </section>
 

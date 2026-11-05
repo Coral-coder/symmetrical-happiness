@@ -184,12 +184,32 @@ details summary { cursor: pointer; color: var(--accent); margin-top: 6px; }
 .install { margin-left: 6px; }
 
 /* ---------- DM screen ---------- */
+.screen-head { display: flex; gap: 14px; align-items: flex-start; flex-wrap: wrap; }
+.page-strip {
+  flex: 1 1 400px; min-width: 0; display: flex; gap: 8px; overflow-x: auto; padding: 2px 2px 8px;
+  scrollbar-width: thin;
+}
+.page-thumb {
+  flex: 0 0 auto; width: 132px; padding: 4px; border: 2px solid var(--line); border-radius: 8px;
+  background: var(--panel); color: var(--ink); cursor: pointer; font: inherit; font-size: 12px; text-align: left;
+}
+.page-thumb img { display: block; width: 100%; aspect-ratio: 33 / 20; object-fit: cover; object-position: top left; border-radius: 4px; background: #fff; }
+.page-thumb span { display: block; margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.page-thumb.on { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.screen-side { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }
+.screen-toolbar { margin: 8px 0; }
+.zoom-group { display: inline-flex; gap: 4px; }
+[data-zoom].on { border-color: var(--accent); color: var(--accent); font-weight: 600; }
 .screen-wrap {
-  overflow: auto; background: var(--panel); border: 1px solid var(--line);
-  border-radius: var(--radius); box-shadow: var(--shadow); cursor: grab; max-height: 75vh;
+  overflow: auto; background: #fff; border: 1px solid var(--line);
+  border-radius: var(--radius); box-shadow: var(--shadow); cursor: grab; max-height: 78vh;
+  -webkit-overflow-scrolling: touch;
 }
 .screen-wrap.dragging { cursor: grabbing; }
-.screen-wrap img { display: block; width: 100%; height: auto; user-select: none; }
+.screen-wrap img { display: block; width: 100%; height: auto; max-width: none; user-select: none; -webkit-user-select: none; }
+.screen-viewer:fullscreen { background: #111; padding: 8px; display: flex; flex-direction: column; overflow: auto; }
+.screen-viewer:fullscreen .screen-wrap { max-height: none; flex: 1; border-radius: 0; }
+.screen-viewer:fullscreen .hint { display: none; }
 
 /* ---------- dialog (stat block) ---------- */
 dialog {
@@ -254,6 +274,9 @@ dialog::backdrop { background: rgba(20, 12, 6, .55); }
   .preview-head h2 { font-size: 22px; }
   .dialog-inner { padding: 18px; }
   .statblock h2 { font-size: 24px; }
+  .page-thumb { width: 108px; }
+  .screen-side { flex-direction: row; flex-wrap: wrap; align-items: center; width: 100%; }
+  .screen-wrap { max-height: 70vh; }
   .preview-table input[data-k="name"] { min-width: 170px; }
   .preview-table input, .preview-table select { min-width: 110px; }
 }

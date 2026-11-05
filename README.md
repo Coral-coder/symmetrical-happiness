@@ -4,7 +4,7 @@ A web app for tracking homebrew D&D content: **spells, magic items and monsters*
 It runs entirely in your browser: no server, no account. GitHub Actions publishes it to GitHub Pages,
 and you can **install it as an app on Windows, Android, ChromeOS, macOS and iOS**. It works offline.
 
-![DM screen](public/img/dm-screen.jpg)
+![DM screen](public/img/screens/fitz-1.webp)
 
 ## Features
 
@@ -23,7 +23,9 @@ and you can **install it as an app on Windows, Android, ChromeOS, macOS and iOS*
   - **Monsters:** CR range, creature type, size, source.
 - **Delete** with the 🗑 button, or tick several and use *Delete selected*. *Select all* only picks what your filters show.
 - **Edit or add** entries by hand. Click a row to see its stat block.
-- **DM Screen tab** with the quick-reference image. Drag to pan, and zoom with the buttons.
+- **DM Screen tab:** all 6 pages of *Fitz's 5e DM Screen* (a free fan-made reference) in high resolution, plus
+  **your own images or PDFs**, which you can upload, rename, reorder and delete. PDFs become one page each. There are zoom buttons, double-tap to zoom, and full screen.
+  Uploaded pages are stored on the device and included in backups.
 - **Backup:** export everything to a JSON file and restore it on another device.
 
 ## Where is my data?

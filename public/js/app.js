@@ -1,6 +1,7 @@
 // Homebrew Vault front end. Plain JS, no build step, no server: data lives
 // in this browser's IndexedDB (see store.js) and imports are parsed locally.
-import { openStore, entriesFromBackup } from './store.js';
+import { openStore, entriesFromBackup, imagesFromBackup } from './store.js';
+import { initScreen } from './screen.js';
 import { importFromUrl, parseText, parseHtml, makeFetcher, DEFAULT_PROXIES } from './importer.js';
 
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -711,28 +712,8 @@ $('#save-selected').addEventListener('click', async () => {
 });
 
 // ------------------------------------------------------------ DM screen
-
-(function dmScreen() {
-  const wrap = $('#screen-wrap');
-  const img = $('#screen-img');
-  $$('[data-zoom]').forEach((b) => b.addEventListener('click', () => {
-    img.style.width = `${Number(b.dataset.zoom) * 100}%`;
-  }));
-  let drag = null;
-  wrap.addEventListener('pointerdown', (ev) => {
-    drag = { x: ev.clientX, y: ev.clientY, sl: wrap.scrollLeft, st: wrap.scrollTop };
-    wrap.classList.add('dragging');
-    wrap.setPointerCapture(ev.pointerId);
-  });
-  wrap.addEventListener('pointermove', (ev) => {
-    if (!drag) return;
-    wrap.scrollLeft = drag.sl - (ev.clientX - drag.x);
-    wrap.scrollTop = drag.st - (ev.clientY - drag.y);
-  });
-  const end = () => { drag = null; wrap.classList.remove('dragging'); };
-  wrap.addEventListener('pointerup', end);
-  wrap.addEventListener('pointercancel', end);
-}());
+// See screen.js; started once the store is open.
+let dmScreen = null;
 
 // ------------------------------------------------------------ routing
 
@@ -813,16 +794,26 @@ $('#import-backup').addEventListener('change', async (ev) => {
   ev.target.value = '';
   if (!file) return;
   try {
-    const entries = entriesFromBackup(JSON.parse(await file.text()));
-    const r = await store.save(entries, { replace: $('#backup-replace').checked });
+    const data = JSON.parse(await file.text());
+    const r = await store.save(entriesFromBackup(data), { replace: $('#backup-replace').checked });
+    const images = imagesFromBackup(data);
+    if (images.length) {
+      // Skip pages already on this device (same name and size).
+      const have = new Set((await store.listImages()).map((i) => `${i.name}|${i.data.byteLength}`));
+      const fresh = images.filter((i) => !have.has(`${i.name}|${i.data.byteLength}`));
+      if (fresh.length) await store.addImages(fresh);
+      await dmScreen?.refresh();
+    }
     await loadEntries();
     renderMore();
-    toast(`Restored ${r.saved}${r.skipped ? ` · ${r.skipped} duplicates skipped` : ''}`);
+    toast(`Restored ${r.saved} entries${r.skipped ? ` (${r.skipped} duplicates skipped)` : ''}${images.length ? ` and ${images.length} screen page${images.length === 1 ? '' : 's'}` : ''}`);
   } catch (err) { toast(err.message); }
 });
 $('#wipe').addEventListener('click', async () => {
   if (!confirm('Delete EVERYTHING in your vault on this device? Export a backup first if you might want it back.')) return;
   await store.clear();
+  for (const img of await store.listImages()) await store.removeImage(img.id);
+  await dmScreen?.refresh();
   await loadEntries();
   renderMore();
   toast('Vault emptied');
@@ -871,6 +862,8 @@ function handleShareTarget() {
   try {
     store = await openStore();
     await loadEntries();
+    dmScreen = initScreen({ store, toast });
+    await dmScreen.load();
   } catch (err) {
     toast(`Could not open your vault: ${err.message}`);
   }

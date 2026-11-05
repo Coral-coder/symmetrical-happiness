@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { IDBFactory } from 'fake-indexeddb';
-import { openStore, entriesFromBackup } from '../public/js/store.js';
+import { openStore, entriesFromBackup, imagesFromBackup } from '../public/js/store.js';
 
 const fresh = () => openStore({ name: `t-${Math.random()}`, indexedDB: new IDBFactory() });
 
@@ -66,4 +66,34 @@ test('clear empties the vault', async () => {
   await store.save([{ kind: 'spell', name: 'A' }]);
   await store.clear();
   assert.equal((await store.list()).length, 0);
+});
+
+test('screen images: add, order, rename, move, delete, backup', async () => {
+  const store = await fresh();
+  const bytes = (n) => new Uint8Array([n, n + 1, n + 2]).buffer;
+  const [a, b, c] = await store.addImages([
+    { name: 'Front', type: 'image/png', data: bytes(1) },
+    { name: 'Back', type: 'image/webp', data: bytes(5) },
+    { name: '', type: 'image/jpeg', data: bytes(9) },
+  ]);
+  let imgs = await store.listImages();
+  assert.deepEqual(imgs.map((i) => i.name), ['Front', 'Back', 'Screen']);
+
+  await store.moveImage(c, -1);
+  await store.renameImage(a, 'Cover');
+  imgs = await store.listImages();
+  assert.deepEqual(imgs.map((i) => i.name), ['Cover', 'Screen', 'Back']);
+  assert.deepEqual([...new Uint8Array(imgs[1].data)], [9, 10, 11]);
+
+  await store.removeImage(b);
+  const backup = JSON.parse(JSON.stringify(await store.exportAll()));
+  assert.equal(backup.images.length, 2);
+
+  const other = await fresh();
+  await other.addImages(imagesFromBackup(backup));
+  const restored = await other.listImages();
+  assert.deepEqual(restored.map((i) => i.name), ['Cover', 'Screen']);
+  assert.deepEqual([...new Uint8Array(restored[0].data)], [1, 2, 3]);
+  assert.equal(restored[1].type, 'image/jpeg');
+  assert.deepEqual(imagesFromBackup({ entries: [] }), []);
 });
