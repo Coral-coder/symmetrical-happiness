@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Homebrew Vault</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🐉</text></svg>">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo">🐉</span>
+      <div>
+        <h1>Homebrew Vault</h1>
+        <p class="tagline">Your spells, items &amp; monsters, all in one place</p>
+      </div>
+    </div>
+    <nav class="tabs" role="tablist">
+      <button class="tab" data-view="spell" role="tab">Spells <span class="count" data-count="spell">0</span></button>
+      <button class="tab" data-view="item" role="tab">Items <span class="count" data-count="item">0</span></button>
+      <button class="tab" data-view="monster" role="tab">Monsters <span class="count" data-count="monster">0</span></button>
+      <button class="tab" data-view="import" role="tab">＋ Import</button>
+      <button class="tab" data-view="screen" role="tab">DM Screen</button>
+    </nav>
+  </header>
+
+  <main>
+    <!-- Library (spells / items / monsters share this view) -->
+    <section id="library" class="view" hidden>
+      <div class="filters" id="filters"></div>
+      <div class="toolbar">
+        <label class="check"><input type="checkbox" id="select-all"> <span id="result-count">0 results</span></label>
+        <div class="toolbar-right">
+          <select id="sort" aria-label="Sort by"></select>
+          <button class="btn" id="add-new">＋ New</button>
+          <button class="btn danger" id="delete-selected" disabled>Delete selected</button>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table class="entries">
+          <thead id="entries-head"></thead>
+          <tbody id="entries-body"></tbody>
+        </table>
+      </div>
+      <div class="empty" id="empty" hidden>
+        <p class="empty-title">Nothing here yet</p>
+        <p>Head to <a href="#import">＋ Import</a> to pull content in from a webpage, or add an entry by hand.</p>
+      </div>
+    </section>
+
+    <!-- Import -->
+    <section id="import" class="view" hidden>
+      <div class="card">
+        <div class="seg" role="tablist">
+          <button class="seg-btn active" data-mode="url">From a webpage</button>
+          <button class="seg-btn" data-mode="text">Paste text</button>
+        </div>
+
+        <form id="import-form">
+          <div data-mode-panel="url">
+            <label class="field">
+              <span>Page URL</span>
+              <input type="url" id="import-url" placeholder="https://dnd5e.wikidot.com/spells:wizard" autocomplete="off">
+            </label>
+            <label class="check"><input type="checkbox" id="follow-links">
+              Also open each linked entry to grab full descriptions <small>(slower; useful for list pages like wikidot)</small></label>
+            <p class="hint">Works with stat-block pages, spell/item list tables, sites that embed their data as JSON
+              (like mythical.ink), and Homebrewery share links. Try:
+              <a href="#" class="example">https://dnd5e.wikidot.com/spells:wizard</a> ·
+              <a href="#" class="example">https://mythical.ink/en/rpg-tools/dnd-spell-list</a> ·
+              <a href="#" class="example">https://dnd5e.wikidot.com/wondrous-items</a></p>
+          </div>
+          <div data-mode-panel="text" hidden>
+            <label class="field">
+              <span>Paste spells, items or monsters (plain text, Homebrewery markdown, or JSON)</span>
+              <textarea id="import-text" rows="10" placeholder="Ember Lance&#10;2nd-level evocation&#10;Casting Time: 1 action&#10;Range: 90 feet&#10;Components: V, S&#10;Duration: Instantaneous&#10;A lance of white-hot embers..."></textarea>
+            </label>
+          </div>
+
+          <div class="row">
+            <label class="field grow">
+              <span>Source name <small>(optional: overrides each entry's source, e.g. "Kobold's Grimoire")</small></span>
+              <input type="text" id="import-source" placeholder="Leave blank to keep the page's own source">
+            </label>
+            <label class="field">
+              <span>Only import</span>
+              <select id="import-kind">
+                <option value="">Everything</option>
+                <option value="spell">Spells</option>
+                <option value="item">Items</option>
+                <option value="monster">Monsters</option>
+              </select>
+            </label>
+          </div>
+          <button class="btn primary" type="submit" id="import-go">Find content</button>
+        </form>
+      </div>
+
+      <div id="preview" hidden>
+        <div class="preview-head">
+          <div>
+            <h2 id="preview-title">Preview</h2>
+            <p class="muted" id="preview-sub"></p>
+          </div>
+          <div class="toolbar-right">
+            <label class="check"><input type="checkbox" id="overwrite"> Overwrite duplicates</label>
+            <button class="btn primary" id="save-selected">Save selected</button>
+          </div>
+        </div>
+        <div id="warnings"></div>
+        <div class="table-wrap">
+          <table class="entries preview-table">
+            <thead><tr>
+              <th class="cb"><input type="checkbox" id="preview-all" checked aria-label="Select all"></th>
+              <th>Name</th><th>Kind</th><th>Level / Type</th><th>School / Rarity / CR</th><th>Source</th><th></th>
+            </tr></thead>
+            <tbody id="preview-body"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- DM screen -->
+    <section id="screen" class="view" hidden>
+      <div class="toolbar">
+        <p class="muted">Quick reference. Drag to pan, use the buttons to zoom.</p>
+        <div class="toolbar-right">
+          <button class="btn" data-zoom="1">Fit</button>
+          <button class="btn" data-zoom="2">2×</button>
+          <button class="btn" data-zoom="3">3×</button>
+          <a class="btn" href="img/dm-screen.jpg" target="_blank" rel="noopener">Open image</a>
+        </div>
+      </div>
+      <div class="screen-wrap" id="screen-wrap">
+        <img src="img/dm-screen.jpg" alt="DM screen: character advancement, conditions, actions in combat, armor, weapons, cover, travel pace, damage types, and more" id="screen-img" draggable="false">
+      </div>
+    </section>
+  </main>
+
+  <!-- Detail / edit dialog -->
+  <dialog id="dialog">
+    <div class="dialog-inner" id="dialog-content"></div>
+  </dialog>
+
+  <div id="toast" class="toast" hidden></div>
+
+  <script src="app.js" type="module"></script>
+</body>
+</html>
